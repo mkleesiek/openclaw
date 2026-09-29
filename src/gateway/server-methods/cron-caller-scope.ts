@@ -18,7 +18,6 @@ import { normalizeAgentId } from "../../routing/session-key.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import {
   consumeCronCreatorAuthorityGrant,
-  getCronFailureRepairAuthority,
   getCronManagementAuthority,
   getCronManagementCallerOrigin,
   getCronManagementChannelRequester,
@@ -81,7 +80,6 @@ export function resolveCronMutationCommitGuard(
     client?.internal?.agentRuntimeIdentity && context.validateAgentRuntimeApprovalAuthority;
   const identity = client?.internal?.agentRuntimeIdentity;
   const manageAll = identity ? getCronManagementAuthority(identity) : undefined;
-  const failureRepair = identity ? getCronFailureRepairAuthority(identity) : undefined;
   const creatorGrant = identity?.cronCreatorAuthorityGrant;
   const requesterGrant =
     creatorGrant &&
@@ -94,7 +92,6 @@ export function resolveCronMutationCommitGuard(
     !validatesAuthority &&
     !jobScope?.callerScope &&
     !manageAll &&
-    !failureRepair &&
     !requesterGrant &&
     !callerAuthority?.sessionMutationCommitGuard &&
     !callerAuthority?.hasCurrentClientAuthority
@@ -108,7 +105,6 @@ export function resolveCronMutationCommitGuard(
       throw new TypeError("Gateway caller authority is no longer active.");
     }
     manageAll?.();
-    failureRepair?.assertActive();
     if (validatesAuthority) {
       assertActiveAgentRuntimeAuthority(client, context);
     }
@@ -153,8 +149,6 @@ export type CronCallerScope = {
   toolsAllowExecTarget?: CronToolsAllowExecTarget;
   cronCreatorAuthorityGrant?: CronCreatorAuthorityGrant;
   manageAll?: () => void;
-  /** Redeemed host repair grant: exactly this job, without manage-all authority. */
-  failureRepair?: { jobId: string; assertActive: () => void };
 };
 
 export function readCronCallerScope(
@@ -171,7 +165,6 @@ export function readCronCallerScope(
       : undefined;
   const sourceChannel = identity.turnSourceChannel?.trim().toLowerCase();
   const manageAll = getCronManagementAuthority(identity);
-  const failureRepair = getCronFailureRepairAuthority(identity);
   const fallbackCallerOrigin = sourceChannel
     ? ({ kind: "external", channel: sourceChannel } as const)
     : identity.turnSourceLocal === true
@@ -227,7 +220,6 @@ export function readCronCallerScope(
     accountId: normalizeAccountId(identity.turnSourceAccountId),
     currentJobId,
     manageAll,
-    ...(failureRepair ? { failureRepair } : {}),
     ...(toolsAllowProvenance ? { toolsAllowProvenance } : {}),
     ...(surfaceProvenance && identity.cronExecToolTarget?.host === "gateway"
       ? {
@@ -301,7 +293,7 @@ function resolveCronJobOwnerAgentId(job: Pick<CronJob, "owner">): string | undef
   return ownerAgentId ? normalizeAgentId(ownerAgentId) : undefined;
 }
 
-export function isOperatorCommandCronJob(job: CronJob): boolean {
+function isOperatorCommandCronJob(job: CronJob): boolean {
   return (
     job.payload.kind === "command" ||
     job.schedule.kind === "on-exit" ||
@@ -327,14 +319,6 @@ export function cronJobMatchesCallerScope(params: {
   // payload env, watched commands, or manual force-run controls.
   if (isOperatorCommandCronJob(params.job)) {
     return false;
-  }
-  const failureRepair = params.callerScope.failureRepair;
-  if (failureRepair) {
-    if (params.job.id !== failureRepair.jobId) {
-      return false;
-    }
-    failureRepair.assertActive();
-    return true;
   }
   const effectiveAgentId = resolveCronJobEffectiveAgentId(params.job, params.defaultAgentId);
   const policy = params.job.scheduledToolPolicy;
