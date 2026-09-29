@@ -350,15 +350,8 @@ async function updateLoadedJob(params: {
     scheduleValidationNowMs: now,
     cronConfig: state.deps.cronConfig,
     scheduledToolPolicy: opts?.scheduledToolPolicy,
-    ...(opts?.retainToolsAllowAuthority
-      ? {
-          toolsAllowProvenance: job.toolsAllowProvenance,
-          toolsAllowExecTarget: job.toolsAllowExecTarget,
-        }
-      : {
-          toolsAllowProvenance: opts?.toolsAllowProvenance,
-          toolsAllowExecTarget: opts?.toolsAllowExecTarget,
-        }),
+    toolsAllowProvenance: opts?.toolsAllowProvenance,
+    toolsAllowExecTarget: opts?.toolsAllowExecTarget,
     configuredChannels,
   });
   finalizeUpdatedJob({
