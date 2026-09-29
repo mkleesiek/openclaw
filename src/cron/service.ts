@@ -20,7 +20,7 @@ import {
   type CronWakeMode,
   createCronServiceState,
 } from "./service/state.js";
-import type { CronJob, CronJobCreate, CronJobPatch } from "./types.js";
+import type { CronJob, CronJobCreate, CronJobPatch, CronStoredJob } from "./types.js";
 
 export type { CronEvent } from "./service/state.js";
 
@@ -171,7 +171,7 @@ export class CronService implements CronServiceContract {
     return result;
   }
 
-  getJob(id: string): CronJob | undefined {
+  getJob(id: string): CronStoredJob | undefined {
     return this.state.store?.jobs.find((job) => job.id === id);
   }
 
