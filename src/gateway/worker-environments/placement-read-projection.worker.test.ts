@@ -69,7 +69,7 @@ describe("worker placement read projection", () => {
     });
     store.markWorkspaceResultPending(claim);
     const stagedResultRef = `refs/openclaw/worker-results/${claim.claimId}`;
-    store.recordStagedWorkspaceResult(claim, stagedResultRef);
+    await store.recordStagedWorkspaceResult(claim, stagedResultRef);
     store.recordWorkspaceResultConflict(claim, { paths: ["changed.txt"], stagedResultRef });
     const draining = store.startWorkspaceResultDrain(claim);
     const pendingResult = store.listPendingWorkspaceResults("pending")[0];
@@ -254,10 +254,13 @@ describe("worker placement read projection", () => {
           createdAt,
         );
       }
-      const journalOwners = store.listWorkspaceReconciliationOwners();
+      const journalOwners = await store.listWorkspaceReconciliationOwners();
+      const journalPlacements = await Promise.all(
+        journalOwners.map((owner) => store.getWorkspaceReconciliationPlacement(owner)),
+      );
       const blockingOwners = new Set(
         journalOwners
-          .filter((owner) => store.getWorkspaceReconciliationPlacement(owner))
+          .filter((_owner, index) => journalPlacements[index])
           .map((owner) => owner.sessionId),
       );
       expect(blockingOwners).toEqual(new Set(["journal-current", "journal-draining"]));

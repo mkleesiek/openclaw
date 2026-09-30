@@ -100,7 +100,7 @@ export async function buildPreparedCompactionRuntime(
     sandbox,
     effectiveWorkspace,
     effectiveCwd,
-    effectiveSkillAgentId: sessionAgentId,
+    sessionAgentId,
   } = prepared;
   const mode = params.execOverrides?.mode
     ? SESSION_PERMISSION_BY_EXEC_MODE[params.execOverrides.mode]
@@ -340,7 +340,7 @@ export async function buildPreparedCompactionRuntime(
       model: effectiveModel,
     };
     const normalizableToolProjection = filterProviderNormalizableTools(toolsRaw);
-    logRuntimeToolSchemaQuarantine({
+    await logRuntimeToolSchemaQuarantine({
       diagnostics: normalizableToolProjection.diagnostics,
       tools: toolsRaw,
       runId,
@@ -379,7 +379,7 @@ export async function buildPreparedCompactionRuntime(
     });
     const normalizableBundledToolProjection = filterProviderNormalizableTools(filteredBundledTools);
     if (normalizableBundledToolProjection.diagnostics.length > 0) {
-      logRuntimeToolSchemaQuarantine({
+      await logRuntimeToolSchemaQuarantine({
         diagnostics: normalizableBundledToolProjection.diagnostics,
         tools: filteredBundledTools,
         runId,
@@ -397,7 +397,7 @@ export async function buildPreparedCompactionRuntime(
         : filteredBundledTools;
     const projectedEffectiveTools = [...tools, ...normalizedBundledTools];
     const toolSchemaProjection = filterRuntimeCompatibleTools(projectedEffectiveTools);
-    logRuntimeToolSchemaQuarantine({
+    await logRuntimeToolSchemaQuarantine({
       diagnostics: toolSchemaProjection.diagnostics,
       tools: projectedEffectiveTools,
       runId,
@@ -595,7 +595,6 @@ export async function buildPreparedCompactionRuntime(
       allowedToolNames,
       buildSystemPromptText,
       resolvedMessageProvider,
-      sessionAgentId,
     };
   } catch (err) {
     restoreSkillEnvironment();

@@ -378,7 +378,7 @@ describe("subagent registry archive behavior", () => {
       }
       return {};
     });
-    vi.mocked(ensureContextEnginesInitialized).mockImplementation(() => {});
+    vi.mocked(ensureContextEnginesInitialized).mockResolvedValue(undefined);
     vi.mocked(resolveContextEngine).mockResolvedValue({
       info: { id: "test", name: "Test", version: "0.0.1" },
       ingest: async () => ({ ingested: false }),
@@ -453,7 +453,7 @@ describe("subagent registry archive behavior", () => {
     expect(mod.listSubagentRunsForRequester("agent:main:main")).toHaveLength(0);
   });
 
-  it("retains cancellation evidence when the native retirement commit is rejected", async () => {
+  it("retains cancellation evidence when the retirement write is rejected", async () => {
     const now = Date.now();
     const runId = "run-killed-tombstone-retry";
     addCanonicalSubagentRunForTests({
@@ -479,19 +479,19 @@ describe("subagent registry archive behavior", () => {
     entry.execution.suppressSessionEffects = true;
     registryState.persistSubagentRunsToDiskOrThrow(subagentRuns, [runId]);
     const persist = registryState.persistSubagentRunsToDiskAsyncOrThrow;
-    let rejectedCommits = 0;
+    let rejectedWrites = 0;
     const writer = vi
       .spyOn(registryState, "persistSubagentRunsToDiskAsyncOrThrow")
-      .mockImplementation((runs, changedRunIds, options) => {
-        if (options.retireRunIds?.includes(runId)) {
-          rejectedCommits += 1;
-          return Promise.reject(new Error("native retirement commit rejected"));
+      .mockImplementation(async (runs, changedRunIds, options) => {
+        if (changedRunIds.includes(runId) && options.retireRunIds?.includes(runId)) {
+          rejectedWrites += 1;
+          throw new Error("retirement write rejected");
         }
-        return persist(runs, changedRunIds, options);
+        await persist(runs, changedRunIds, options);
       });
     try {
       await sweepAndSettleCleanup();
-      expect(rejectedCommits).toBe(1);
+      expect(rejectedWrites).toBe(1);
       expect(subagentRuns.get(runId)).toBe(entry);
       expect(entry).toMatchObject({
         endedReason: "subagent-killed",
