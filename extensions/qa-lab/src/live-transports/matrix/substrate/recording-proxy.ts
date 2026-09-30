@@ -563,7 +563,12 @@ export async function startMatrixQaRecordingProxy(params: {
     ...observer,
     buildManifest({ generatedAt, requestedProfile, scenarioIds, substrate }) {
       const selectedIds = new Set(scenarioIds);
-      const byScenario = Map.groupBy(records, (record) => record.scenarioId);
+      const byScenario = new Map<string, MatrixQaInternalRecordedExchange[]>();
+      for (const record of records) {
+        const entries = byScenario.get(record.scenarioId) ?? [];
+        entries.push(record);
+        byScenario.set(record.scenarioId, entries);
+      }
       const scenarios = Object.fromEntries(
         scenarioIds.map((id) => [id, buildExpectation(byScenario.get(id) ?? [])]),
       );
