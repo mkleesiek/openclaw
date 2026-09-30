@@ -66,11 +66,10 @@ export function registerLazyCommandGroup(
     command.option(option.flags, option.description);
   }
   command.allowUnknownOption(true).allowExcessArguments(true);
-  command.action(async (...actionArgs) => {
-    const actionCommand = actionArgs.at(-1) as Command;
+  command.action(async () => {
     removeCommandGroupNames(program, entry);
     await entry.register(program);
-    await reparseProgramFromActionCommand(program, actionCommand);
+    await reparseProgramFromActionCommand(program, command);
   });
 }
 

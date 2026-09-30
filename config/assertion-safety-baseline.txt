@@ -1864,7 +1864,6 @@ src/cli/program/message/helpers.ts	1
 src/cli/program/message/register.permissions-search.ts	2
 src/cli/program/preaction.ts	1
 src/cli/program/program-context.ts	2
-src/cli/program/register-lazy-command.ts	1
 src/cli/program/register.agent-turn.ts	1
 src/cli/program/register.audit.ts	12
 src/cli/program/register.configure.ts	1
@@ -1877,7 +1876,7 @@ src/cli/secrets-cli.ts	2
 src/cli/secrets-store-cli.ts	1
 src/cli/session-ref.ts	1
 src/cli/setup-onboard-configure-help-fast-path.ts	2
-src/cli/skills-cli.ts	2
+src/cli/skills-cli.ts	1
 src/cli/startup-metadata.ts	1
 src/cli/subprocess-exit-code.ts	1
 src/cli/test-runtime-capture.ts	1
