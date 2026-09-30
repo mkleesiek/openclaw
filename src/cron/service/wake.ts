@@ -45,6 +45,9 @@ export function enqueueCronNotification(
       reason: "wake",
       agentId,
       sessionKey,
+      // The repair turn answers in its owner conversation even when heartbeat output stays
+      // internal (`heartbeat.target: "none"`), as main-session cron reminders do.
+      ...(owner ? { heartbeat: { target: "last" } } : {}),
     });
   }
 }

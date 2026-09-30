@@ -142,6 +142,8 @@ When a job created from a conversation (it has an owner session) reaches its exe
 
 The repair runs with the owner conversation's own tools, the same place the in-app alert fallback already posts alert text. A scheduler-woken turn has no sender-owner identity, so it cannot use automation control tools; changing the job itself happens in your reply turn.
 
+The repair turn is carried by a heartbeat wake of the owner conversation, and its reply goes to that conversation's last route: `agents.defaults.heartbeat.target: "none"` keeps periodic heartbeats internal, not repair replies, and heartbeat `activeHours` do not delay a repair. With `heartbeat.isolatedSession: true`, the repair runs in the conversation's isolated heartbeat session: it shares the agent workspace, not the conversation transcript, and the conversation is told what the repair posted so a later "go ahead" there has it in context.
+
 Each failure streak gets at most one repair request. The alert is sent as before when the job has no owner conversation. If the job fails again after the request, you get the normal failure alert once, noting that a repair was requested. A successful run clears the streak silently.
 
 Script setup refreshes retired tools after a plugin reload before execution begins. If that recovery fails, the alert explains that tools could not be refreshed and the script did not run, then points to automation history and plugin status. A monitor that could not run has no new evidence about the system it monitors.
