@@ -19,7 +19,6 @@ export const databaseWorkerCoreTestFiles = [
   "src/cli/update-cli/update-command-initial-admission.test.ts",
   "src/cli/update-cli/update-command-migrated-windows.test.ts",
   "src/cli/update-cli/update-command-original-service.test.ts",
-  "src/cli/update-cli/update-command-post-update.test.ts",
   "src/cli/update-cli/update-command-service-maintenance.test.ts",
   "src/cli/update-cli/update-command-service-maintenance-handoff.test.ts",
   "src/cli/update-cli/update-command-service-maintenance-native.test.ts",
