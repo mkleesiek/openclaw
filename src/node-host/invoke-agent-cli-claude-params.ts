@@ -231,12 +231,22 @@ export async function decodeClaudeCliNodeRunParams(
   if (value.skillRuntime !== undefined && value.skillRuntime !== true) {
     throw new Error("INVALID_REQUEST: skillRuntime must be true when supplied");
   }
-  const optionalString = (name: string, maxBytes = MAX_ARG_BYTES) =>
-    value[name] === undefined ? undefined : requireBoundedString(value[name], name, maxBytes);
-  const stdin = optionalString("stdin", MAX_REQUEST_BYTES);
-  const systemPrompt = optionalString("systemPrompt", MAX_REQUEST_BYTES);
-  const agentId = optionalString("agentId");
-  const sessionKey = optionalString("sessionKey");
+  const stdin =
+    value.stdin === undefined
+      ? undefined
+      : requireBoundedString(value.stdin, "stdin", MAX_REQUEST_BYTES);
+  const systemPrompt =
+    value.systemPrompt === undefined
+      ? undefined
+      : requireBoundedString(value.systemPrompt, "systemPrompt", MAX_REQUEST_BYTES);
+  const agentId =
+    value.agentId === undefined
+      ? undefined
+      : requireBoundedString(value.agentId, "agentId", MAX_ARG_BYTES);
+  const sessionKey =
+    value.sessionKey === undefined
+      ? undefined
+      : requireBoundedString(value.sessionKey, "sessionKey", MAX_ARG_BYTES);
   const approvalDecision =
     value.approvalDecision === "allow-once" || value.approvalDecision === "allow-always"
       ? value.approvalDecision
@@ -249,7 +259,8 @@ export async function decodeClaudeCliNodeRunParams(
   if (value.systemRunPlan !== undefined && !systemRunPlan) {
     throw new Error("INVALID_REQUEST: systemRunPlan must be an object");
   }
-  const cwd = optionalString("cwd");
+  const cwd =
+    value.cwd === undefined ? undefined : requireBoundedString(value.cwd, "cwd", MAX_ARG_BYTES);
   if (cwd) {
     const stat = await fs.stat(cwd).catch(() => undefined);
     if (!stat?.isDirectory()) {
