@@ -113,10 +113,22 @@ enum PostAppUpdateReceiptStore {
         } else if let pending = self.pending(
             currentVersion: currentVersion,
             currentRuntimeBuildID: runtimeBuildID,
-            defaults: defaults),
-            runtimeBuildID == nil || pending.runtimeBuildID == runtimeBuildID
+            defaults: defaults)
         {
-            receipt = pending
+            if pending.runtimeBuildID == nil, let runtimeBuildID {
+                let enriched = PostAppUpdateReceipt(
+                    fromVersion: pending.fromVersion,
+                    toVersion: pending.toVersion,
+                    recordedAt: pending.recordedAt,
+                    gatewayUpdateIncomplete: pending.gatewayUpdateIncomplete,
+                    notificationAttempts: pending.notificationAttempts,
+                    notificationInFlight: pending.notificationInFlight,
+                    runtimeBuildID: runtimeBuildID)
+                self.persist(enriched, defaults: defaults)
+                receipt = enriched
+            } else {
+                receipt = pending
+            }
         } else if previousVersion != currentVersion || (runtimeBuildID != nil && runtimeBuildID != previousBuildID) {
             // The first recorder-capable build has no prior launch marker. An
             // onboarded install is therefore an upgrade; fresh installs were gated above.

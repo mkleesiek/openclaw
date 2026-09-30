@@ -4,6 +4,46 @@ import Testing
 
 @MainActor
 struct PostUpdateBundledRuntimeTests {
+    @Test(arguments: [false, true])
+    func `bundled launch retains legacy Gateway and notification recovery`(notificationInFlight: Bool) throws {
+        let suite = "PostUpdateBundledRuntimeTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let recordedAt = Date(timeIntervalSince1970: 1_720_000_000)
+        PostAppUpdateReceiptStore.record(
+            fromVersion: "2026.8.1",
+            toVersion: "2026.9.1",
+            defaults: defaults,
+            now: recordedAt)
+        var legacy = try #require(PostAppUpdateReceiptStore.pending(
+            currentVersion: "2026.9.1", defaults: defaults))
+        legacy = PostAppUpdateReceiptStore.setGatewayUpdateIncomplete(
+            !notificationInFlight, receipt: legacy, defaults: defaults)
+        legacy = PostAppUpdateReceiptStore.recordNotificationFailure(receipt: legacy, defaults: defaults)
+        PostAppUpdateReceiptStore.setNotificationInFlight(
+            notificationInFlight, receipt: legacy, defaults: defaults)
+
+        let enriched = try #require(PostAppUpdateReceiptStore.pendingForLaunch(
+            currentVersion: "2026.9.1",
+            currentRuntimeBuildID: "build-a",
+            onboardingSeen: true,
+            defaults: defaults,
+            now: recordedAt.addingTimeInterval(60)))
+        #expect(enriched.fromVersion == "2026.8.1")
+        #expect(enriched.toVersion == "2026.9.1")
+        #expect(enriched.recordedAt == recordedAt)
+        #expect(enriched.gatewayUpdateIncomplete == !notificationInFlight)
+        #expect(enriched.notificationAttempts == 1)
+        #expect(enriched.notificationInFlight == notificationInFlight)
+        #expect(enriched.runtimeBuildID == "build-a")
+        #expect(PostAppUpdateReceiptStore.pendingForLaunch(
+            currentVersion: "2026.9.1",
+            currentRuntimeBuildID: "build-a",
+            onboardingSeen: true,
+            defaults: defaults,
+            now: recordedAt.addingTimeInterval(120)) == enriched)
+    }
+
     @Test func `same version runtime rebuild is updated once and preserves failed retries`() throws {
         let suite = "PostUpdateBundledRuntimeTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
