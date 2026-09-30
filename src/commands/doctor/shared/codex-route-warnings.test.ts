@@ -1397,6 +1397,41 @@ describe("collectCodexRouteWarnings", () => {
     expect(store.selected?.updatedAt).toBe(123);
   });
 
+  it("repairs shipped codex namespace session route refs", () => {
+    const store: Record<string, SessionEntry> = {
+      main: {
+        sessionId: "s1",
+        updatedAt: 1,
+        modelProvider: "codex",
+        model: "codex/gpt-5.6-sol",
+        providerOverride: "codex",
+        modelOverride: "codex/gpt-5.6-sol",
+        authProfileOverride: "codex:default",
+        authProfileOverrideSource: "auto",
+        fallbackNotice: {
+          kind: "active",
+          selectedModel: "codex/gpt-5.6-sol",
+          activeModel: "openai/gpt-5.6-sol",
+        },
+        agentRuntimeOverride: "codex",
+      },
+    };
+
+    const result = repairCodexSessionStoreRoutes({ store, now: 123 });
+
+    expect(result).toEqual({ changed: true, sessionKeys: ["main"] });
+    expect(store.main).toMatchObject({
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      providerOverride: "openai",
+      modelOverride: "gpt-5.6-sol",
+      authProfileOverride: "codex:default",
+      updatedAt: 123,
+    });
+    expect(store.main?.fallbackNotice).toBeUndefined();
+    expect(store.main?.agentRuntimeOverride).toBe("codex");
+  });
+
   it("treats slash model ids as raw for custom providers while migrating legacy pairs", () => {
     const store: Record<string, SessionEntry> = {
       custom: {

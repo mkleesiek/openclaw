@@ -152,6 +152,20 @@ afterEach(() => {
 });
 
 describe("guarded fetch policy", () => {
+  it.each([
+    "http://[ff02::1]/internal",
+    "http://0177.0.0.1:8080/internal",
+    "http://0x7f000001/internal",
+    "http://198.18.0.1:8080/internal",
+    "http://user:pass@[::1]:8080/internal",
+  ])("blocks noncanonical and special-use IP literal %s before fetch", async (url) => {
+    const fetchImpl = fetchStub();
+    await expect(fetchWithSsrFGuard({ url, fetchImpl })).rejects.toThrow(
+      /private|internal|blocked/i,
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("blocks private URLs and redacts their path, query and fragment from audit logs", async () => {
     const fetchImpl = fetchStub();
     await expect(

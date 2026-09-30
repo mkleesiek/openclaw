@@ -1032,36 +1032,49 @@ describe("launchd install", () => {
     ]);
   });
 
-  it("restores disabled policy and supervision after bootstrap failure", async () => {
-    const plistPath = resolveLaunchAgentPlistPath(ENV);
-    const previous = setLaunchAgentPlist(ENV, "ai.openclaw.gateway", [
-      "/previous/node",
-      "/previous/openclaw.mjs",
-      "gateway",
-    ]);
-    state.fileModes.set(plistPath, 0o600);
-    state.serviceLoaded = true;
-    state.serviceRunning = true;
-    state.printDisabledOutput = 'disabled services = {\n\t"ai.openclaw.gateway" => disabled\n}';
-    state.bootstrapError = "injected activation failure";
-    state.bootstrapTransient = true;
-    const operation = installLaunchAgent({
-      env: ENV,
-      stdout: new PassThrough(),
-      programArguments: defaultProgramArguments,
-      preserveAutoStart: true,
-    });
-    await expect(operation).rejects.toThrow("injected activation failure");
-    expect(state.files.get(plistPath)).toBe(previous);
-    expect(state.serviceLoaded).toBe(true);
-    expect(state.serviceRunning).toBe(true);
-    expect(await isLaunchAgentEnabled({ env: ENV })).toBe(false);
-    expect(
-      launchctlCommandNames().filter((command) =>
-        ["enable", "bootstrap", "disable"].includes(command),
-      ),
-    ).toEqual(["enable", "bootstrap", "disable", "enable", "bootstrap", "disable"]);
-  });
+  it.each([false, true])(
+    "preserves disabled policy and supervision after bootstrap failure=%s",
+    async (fail) => {
+      const plistPath = resolveLaunchAgentPlistPath(ENV);
+      const previous = setLaunchAgentPlist(ENV, "ai.openclaw.gateway", [
+        "/previous/node",
+        "/previous/openclaw.mjs",
+        "gateway",
+      ]);
+      state.fileModes.set(plistPath, 0o600);
+      state.serviceLoaded = true;
+      state.serviceRunning = true;
+      state.printDisabledOutput = 'disabled services = {\n\t"ai.openclaw.gateway" => disabled\n}';
+      if (fail) {
+        state.bootstrapError = "injected activation failure";
+        state.bootstrapTransient = true;
+      }
+      const operation = installLaunchAgent({
+        env: ENV,
+        stdout: new PassThrough(),
+        programArguments: defaultProgramArguments,
+        preserveAutoStart: true,
+      });
+      if (fail) {
+        await expect(operation).rejects.toThrow("injected activation failure");
+        expect(state.files.get(plistPath)).toBe(previous);
+      } else {
+        await operation;
+      }
+      expect(state.serviceLoaded).toBe(true);
+      expect(state.serviceRunning).toBe(true);
+      expect(await isLaunchAgentEnabled({ env: ENV })).toBe(false);
+      expect(
+        launchctlCommandNames().filter((command) =>
+          ["enable", "bootstrap", "disable"].includes(command),
+        ),
+      ).toEqual(
+        fail
+          ? ["enable", "bootstrap", "disable", "enable", "bootstrap", "disable"]
+          : ["enable", "bootstrap", "disable"],
+      );
+    },
+  );
   it("refuses install and stage before any user LaunchAgent mutation", async () => {
     launchdSystemState.assertNoSystemLaunchDaemonOwnership.mockRejectedValue(
       createSystemOwnershipError(),
@@ -1175,6 +1188,38 @@ describe("launchd install", () => {
     expect(command?.environment?.NODE_OPTIONS).toBe("");
     expect(command?.environmentValueSources?.TMPDIR).toBe("file");
     expect(command?.environmentValueSources?.OPENAI_API_KEY).toBe("file");
+  });
+
+  it("retains custom Node CA trust when reinstalling a generated owner-only LaunchAgent", async () => {
+    const extraCaCerts = "/Users/test/certs/corporate-ca.pem";
+    await installLaunchAgent(
+      defaultLaunchAgentFixture(ENV, {
+        environment: { NODE_EXTRA_CA_CERTS: extraCaCerts },
+      }),
+    );
+
+    const installedCommand = await readLaunchAgentProgramArguments(ENV);
+    expect(installedCommand?.environment?.NODE_EXTRA_CA_CERTS).toBe(extraCaCerts);
+    expect(installedCommand?.environmentValueSources?.NODE_EXTRA_CA_CERTS).toBe("file");
+    const initialEnvWrites = state.fileWrites.filter(({ path }) => path === ENV_FILE).length;
+
+    await installLaunchAgent(
+      defaultLaunchAgentFixture(ENV, {
+        environment: installedCommand?.environment,
+      }),
+    );
+
+    const refreshedCommand = await readLaunchAgentProgramArguments(ENV);
+    expect(refreshedCommand?.environment?.NODE_EXTRA_CA_CERTS).toBe(extraCaCerts);
+    expect(refreshedCommand?.environmentValueSources?.NODE_EXTRA_CA_CERTS).toBe("file");
+    expect(state.fileWrites.filter(({ path }) => path === ENV_FILE).length).toBeGreaterThan(
+      initialEnvWrites,
+    );
+    expect(state.files.get(ENV_FILE)).toContain(`export NODE_EXTRA_CA_CERTS='${extraCaCerts}'`);
+    expect(state.files.get(resolveLaunchAgentPlistPath(ENV))).not.toContain(extraCaCerts);
+    expect(state.fileModes.get(ENV_FILE)).toBe(0o600);
+    expect(state.fileModes.get(WRAPPER)).toBe(0o700);
+    expect(state.dirModes.get("/Users/test/.openclaw/service-env")).toBe(0o700);
   });
 
   it("warns before overwriting a customized generated LaunchAgent env wrapper during restart rewrite", async () => {
@@ -1525,6 +1570,41 @@ describe("launchd install", () => {
     expect(launchctlCommandNames()).toContain("bootout");
     expect(output).toContain("used bootout fallback");
     expect(output).not.toContain("Stopped LaunchAgent");
+  });
+
+  it("does not treat a co-located Gateway's own port as busy when stopping a node-host LaunchAgent", async () => {
+    const env = {
+      ...ENV,
+      OPENCLAW_SERVICE_KIND: "node",
+      OPENCLAW_LAUNCHD_LABEL: "ai.openclaw.node",
+      OPENCLAW_GATEWAY_PORT: "18789",
+    };
+    setLaunchAgentPlist(env, "ai.openclaw.node", [
+      "node",
+      "node",
+      "run",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "18789",
+    ]);
+    let output = "";
+    const stdout = capturePassThroughOutput((text) => (output += text));
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [],
+      hints: [],
+    });
+    probePortUsage.mockResolvedValue("busy");
+
+    await withEnvAsync(EXTERNAL_PROCESS, async () => {
+      await stopLaunchAgent({ env, stdout });
+    });
+
+    expect(inspectPortUsage).not.toHaveBeenCalled();
+    expect(cleanStaleGatewayProcessesSync).not.toHaveBeenCalled();
+    expect(output).toContain("Stopped LaunchAgent");
   });
 
   it("keeps an already-unloaded service disabled when --disable is passed", async () => {
@@ -1948,9 +2028,18 @@ describe("launchd install", () => {
   });
 
   it.each([
+    ["start", "loaded", "", true],
+    ["start", "loaded", "Input/output error", true],
+    ["start", "stopped", "", true],
+    ["start", "stopped", "Could not find service", true],
     ["start", "stopped", "Input/output error", true],
+    ["start", "stopped", "Input/output error", false],
     ["start", "bootstrap-kickstart", "Could not find service", true],
     ["restart", "loaded", "", true],
+    ["restart", "loaded", "Input/output error", true],
+    ["restart", "stopped", "", true],
+    ["restart", "stopped", "Could not find service", true],
+    ["restart", "stopped", "Input/output error", true],
     ["restart", "stopped", "Input/output error", false],
     ["restart", "bootstrap-kickstart", "Could not find service", true],
   ] as const)(

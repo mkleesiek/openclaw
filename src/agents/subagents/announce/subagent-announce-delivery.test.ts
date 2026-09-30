@@ -471,7 +471,7 @@ type DeliveryFixtureParams = Partial<AnnouncementInput> & {
   runtimeConfig?: OpenClawConfig;
   isActive?: boolean;
   sessionId?: string;
-  currentRequesterSessionId?: string;
+  currentRequesterSessionId?: string | null;
   requesterAbandoned?: boolean;
   requesterAbandonment?: "timeout" | "recovering_timeout";
   origin?: AnnouncementInput["directOrigin"];
@@ -537,7 +537,10 @@ async function deliverFixture(
     getRequesterSessionActivity:
       requesterSessionActivity ??
       (() => ({
-        sessionId: currentRequesterSessionId ?? sessionId ?? route.sessionId,
+        sessionId:
+          currentRequesterSessionId === null
+            ? undefined
+            : (currentRequesterSessionId ?? sessionId ?? route.sessionId),
         isActive: isActive === true,
       })),
     ...(queueEmbeddedAgentMessageWithOutcome ? { queueEmbeddedAgentMessageWithOutcome } : {}),
@@ -1069,7 +1072,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it.each(["replacement-parent"])(
+  it.each([null, "replacement-parent"])(
     "does not deliver private completion to a missing or replaced parent: %s",
     async (currentRequesterSessionId) => {
       const callGateway = createGatewayMock({ status: "ok", result: { payloads: [] } });
@@ -2314,6 +2317,36 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     }
   });
 
+  it("delivers Telegram forum-topic subagent completions through the normal parent handoff", async () => {
+    const callGateway = createPayloadGatewayMock({ text: "The delegated task is complete." });
+    const result = await deliverTelegramDirectMessageCompletion({
+      callGateway,
+      requesterSessionKey: "agent:main:telegram:group:-1003871627242:topic:6823",
+      origin: {
+        channel: "telegram",
+        to: "telegram:-1003871627242",
+        accountId: "bot-1",
+        threadId: 6823,
+      },
+      sourceTool: "subagent_announce",
+      internalEvents: taskCompletionEvents({
+        childSessionKey: "agent:codex:subagent:child",
+        childSessionId: "child-session-id",
+        taskLabel: "telegram forum completion smoke",
+        result: "delegated task output",
+      }),
+    });
+    expectDeliveryPath(result, "direct");
+    expect(callGateway).toHaveBeenCalledTimes(1);
+    expectGatewayAgentParams(callGateway, {
+      deliver: true,
+      channel: "telegram",
+      accountId: "bot-1",
+      to: "telegram:-1003871627242",
+      threadId: "6823",
+    });
+  });
+
   it("fails configured channel subagent completions when parent skips required message tool", async () => {
     const callGateway = createPayloadGatewayMock({ text: "The subagent is done." });
     const queueEmbeddedAgentMessageWithOutcome = createQueueOutcomeMock(false);
@@ -2809,6 +2842,26 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       expected: deliveredRequesterFinal,
     }),
     settleCase("rejects a yielded turn without a result", undefined, localOnly),
+    ...[
+      { name: "error", payload: { text: "tool failed", isError: true } },
+      { name: "reasoning", payload: { text: "thinking", isReasoning: true } },
+      { name: "commentary", payload: { text: "working on it", isCommentary: true } },
+      { name: "compaction notice", payload: { text: "compacting", isCompactionNotice: true } },
+      {
+        name: "fallback notice",
+        payload: { text: "switching providers", isFallbackNotice: true },
+      },
+      { name: "status notice", payload: { text: "still working", isStatusNotice: true } },
+      {
+        name: "supplemental TTS audio",
+        payload: {
+          mediaUrl: "file:///tmp/answer.mp3",
+          ttsSupplement: { spokenText: "answer", visibleTextAlreadyDelivered: true },
+        },
+      },
+    ].map(({ name, payload }) =>
+      settleCase(`rejects ${name} instead of a final answer`, { payloads: [payload] }, localOnly),
+    ),
     settleCase(
       "rejects an explicitly hidden assistant payload",
       { payloads: [{ text: "not user visible", visible: false }] },

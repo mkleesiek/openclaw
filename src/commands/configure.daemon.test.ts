@@ -107,7 +107,7 @@ describe("maybeInstallDaemon", () => {
     });
   });
 
-  it.each([true])("blocks install with unresolved auth (reinstall=%s)", async (loaded) => {
+  it.each([false, true])("blocks install with unresolved auth (reinstall=%s)", async (loaded) => {
     serviceIsLoaded.mockResolvedValue(loaded);
     if (loaded) {
       select.mockResolvedValueOnce("reinstall");

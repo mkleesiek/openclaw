@@ -219,6 +219,8 @@ describe("guarded request release", () => {
 
   it.each([
     { source: "signal", timeoutMs: undefined },
+    { source: "signal", timeoutMs: 5_000 },
+    { source: "init", timeoutMs: undefined },
     { source: "init", timeoutMs: 5_000 },
   ])(
     "preserves cancellation from $source with timeout $timeoutMs",

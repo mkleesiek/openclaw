@@ -1,7 +1,7 @@
 // Tests media-only get-reply runs and sandboxed media attachment handling.
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeferred } from "../../../test/helpers/promise.js";
+import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
 import { createAdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { createTestAdmittedRunContext } from "../../agents/admitted-run-context.test-support.js";
 import { MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER } from "../../agents/main-session-recovery/main-session-recovery-admission.js";
@@ -63,6 +63,7 @@ import { createModelSelectionStateFixture } from "./model-selection.test-support
 import { prepareReplyConversation } from "./prompt-session-context.js";
 import { resolveFollowupAbortSignal } from "./queue/types.js";
 import { REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS, createReplyOperation } from "./reply-run-registry.js";
+import { getActiveReplyRunCount } from "./reply-run-registry.registry.js";
 import { testing as replyRunTesting } from "./reply-run-registry.test-support.js";
 import { drainFormattedSystemEvents } from "./session-system-events.js";
 import {
@@ -463,7 +464,17 @@ function requireRunReplyAgentCall(index = 0) {
 
 describe("runPreparedReply media-only handling", () => {
   registerPendingRequesterAuthorityCases({ runPrepared, loadSessionEntryMock });
-  it.each(["owner-alias", "non-owner", "heartbeat", "revoked-before-bind", "revoked"] as const)(
+  it.each([
+    "owner-alias",
+    "non-owner",
+    "heartbeat",
+    "room-event",
+    "spawned",
+    "inter-session",
+    "replay",
+    "revoked-before-bind",
+    "revoked",
+  ] as const)(
     "admits configured Discord owner management through the reply ingress and real automation tool: %s",
     async (kind) => {
       const runId = "discord-owner-management";
@@ -535,8 +546,21 @@ describe("runPreparedReply media-only handling", () => {
             ...createProviderSurface("discord"),
             ChatType: "group",
             SenderId: kind === "owner-alias" ? "transport-alias" : "owner-1",
+            InputProvenance:
+              kind === "inter-session"
+                ? { kind: "inter_session", sourceTool: "sessions_send" }
+                : undefined,
+            InboundEventKind: kind === "room-event" ? "room_event" : undefined,
           }),
-          opts: { runId, isHeartbeat: kind === "heartbeat" },
+          sessionEntry:
+            kind === "spawned"
+              ? { sessionId: "spawned-session", updatedAt: 1, spawnedBy: "agent:parent:main" }
+              : undefined,
+          opts: {
+            runId,
+            isHeartbeat: kind === "heartbeat",
+            suppressNextUserMessagePersistence: kind === "replay",
+          },
         });
         expect(calls).toEqual(kind === "revoked" ? [] : admitted ? ["cron.list"] : ["restricted"]);
       } finally {
@@ -1239,6 +1263,39 @@ describe("runPreparedReply media-only handling", () => {
     });
   });
 
+  it("does not copy prior session media onto text-only followups", async () => {
+    await runPrepared({
+      ctx: {
+        ...createInboundBody("follow up without media"),
+        OriginatingChannel: "telegram",
+        OriginatingTo: "42",
+        ChatType: "direct",
+      },
+      sessionCtx: {
+        ...createSessionBody("follow up without media"),
+        Provider: "telegram",
+        OriginatingChannel: "telegram",
+        OriginatingTo: "42",
+        ChatType: "direct",
+        media: [{ path: "/tmp/previous-image.png", contentType: "image/png" }],
+      },
+    });
+
+    const call = requireRunReplyAgentCall();
+    expect(call.followupRun.media).toEqual([]);
+    expect(call.followupRun.userTurnTranscriptRecorder?.message).toMatchObject({
+      role: "user",
+      content: "follow up without media",
+    });
+    expect(call.followupRun.userTurnTranscriptRecorder?.message).not.toHaveProperty("MediaPath");
+    expect(call.followupRun.userTurnTranscriptRecorder?.message).not.toHaveProperty("MediaPaths");
+    expect(call.followupRun.userTurnTranscriptRecorder?.message).not.toHaveProperty([
+      "__openclaw",
+      "media",
+      0,
+    ]);
+  });
+
   it("projects partially hydrated current images into the runner and transcript layout", async () => {
     const imagePath = "/tmp/described-image.png";
     const secondImageData = Buffer.from("second image bytes");
@@ -1439,6 +1496,45 @@ describe("runPreparedReply media-only handling", () => {
     });
     expect(sessionEntry.authProfileOverride).toBe("openai:subscription");
   });
+
+  it.each([false, true])(
+    "rejects invalid heartbeat profiles before dispatch or reply registration (fast: %s)",
+    async (fast) => {
+      const { resolveSessionAuthSelection } =
+        await import("../../agents/auth-profiles/session-override.js");
+      vi.mocked(shouldUseReplyFastTestRuntime).mockReturnValueOnce(fast);
+      const authEntered = createDeferred();
+      const releaseAuth = createDeferred();
+      vi.mocked(resolveSessionAuthSelection).mockImplementationOnce(async () => {
+        authEntered.resolve();
+        await releaseAuth.promise;
+        throw new Error("Auth profile is not configured for openai.");
+      });
+      const activeBefore = getActiveReplyRunCount();
+      const params = {
+        ...baseParams({ provider: "openai", model: "gpt-5.5", opts: { isHeartbeat: true } }),
+        configuredProfileId: "anthropic:other",
+      };
+      const running = runPreparedReply(params);
+      const rejected = expect(running).rejects.toThrow(
+        "Auth profile is not configured for openai.",
+      );
+      try {
+        await awaitGateBeforeSettlement(
+          authEntered.promise,
+          running,
+          "auth validation was bypassed",
+        );
+        expect(getActiveReplyRunCount()).toBe(activeBefore);
+        expect(runReplyAgent).not.toHaveBeenCalled();
+      } finally {
+        releaseAuth.resolve();
+        await rejected;
+      }
+      expect(runReplyAgent).not.toHaveBeenCalled();
+      expect(getActiveReplyRunCount()).toBe(activeBefore);
+    },
+  );
 
   it("routes a channel-configured interrupt through session-work admission", async () => {
     const queueSettings = await import("./queue/settings-runtime.js");
