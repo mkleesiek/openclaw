@@ -249,11 +249,10 @@ describe("subagent registry archive behavior", () => {
       data: { phase: "end", endedAt, terminalReply: { disposition: "visible", text: "done" } },
     });
 
-    await vi.waitFor(() => {
-      expect(mod.listSubagentRunsForRequester("agent:main:main")[0]).toMatchObject({
-        execution: { status: "terminal", endedAt },
-        archiveAtMs: endedAt + 60_000,
-      });
+    await settleRootWork(true);
+    expect(mod.listSubagentRunsForRequester("agent:main:main")[0]).toMatchObject({
+      execution: { status: "terminal", endedAt },
+      archiveAtMs: endedAt + 60_000,
     });
   });
 
@@ -478,17 +477,17 @@ describe("subagent registry archive behavior", () => {
     // The stopped execution no longer owns session effects, but its native row
     // still owns durable cancellation evidence until retirement commits.
     entry.execution.suppressSessionEffects = true;
-    const persist = registryState.persistSubagentRunsToDiskOrThrow;
-    persist(subagentRuns, [runId]);
+    registryState.persistSubagentRunsToDiskOrThrow(subagentRuns, [runId]);
+    const persist = registryState.persistSubagentRunsToDiskAsyncOrThrow;
     let rejectedCommits = 0;
     const writer = vi
-      .spyOn(registryState, "persistSubagentRunsToDiskOrThrow")
-      .mockImplementation((runs, changedRunIds) => {
-        if (changedRunIds?.includes(runId) && !runs.has(runId)) {
+      .spyOn(registryState, "persistSubagentRunsToDiskAsyncOrThrow")
+      .mockImplementation((runs, changedRunIds, options) => {
+        if (options.retireRunIds?.includes(runId)) {
           rejectedCommits += 1;
-          throw new Error("native retirement commit rejected");
+          return Promise.reject(new Error("native retirement commit rejected"));
         }
-        persist(runs, changedRunIds);
+        return persist(runs, changedRunIds, options);
       });
     try {
       await sweepAndSettleCleanup();
@@ -610,7 +609,7 @@ describe("subagent registry archive behavior", () => {
     expect(mod.listSubagentRunsForRequester("agent:main:main")).toHaveLength(0);
   });
 
-  it("directly kills a replacement run through its durable task ID", () => {
+  it("directly kills a replacement run through its durable task ID", async () => {
     const now = Date.now();
     const childSessionKey = "agent:main:subagent:replacement-direct-kill";
     addCanonicalSubagentRunForTests({
@@ -625,7 +624,7 @@ describe("subagent registry archive behavior", () => {
     });
 
     expect(
-      mod.markSubagentRunTerminated({
+      await mod.markSubagentRunTerminated({
         runId: "run-after-replacement-direct-kill",
         reason: "manual kill",
       }),
