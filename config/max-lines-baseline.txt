@@ -170,7 +170,6 @@ extensions/qa-lab/web/src/app.ts
 extensions/signal/src/core.test.ts
 extensions/signal/src/monitor/event-handler.inbound-context.test.ts
 extensions/signal/src/monitor/event-handler.ts
-extensions/slack/src/action-runtime.test.ts
 extensions/slack/src/action-runtime.ts
 extensions/slack/src/approval-native.test.ts
 extensions/slack/src/channel.test.ts
