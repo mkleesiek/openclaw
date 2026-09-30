@@ -291,7 +291,6 @@ src/agents/main-session-recovery/main-session-restart-recovery.test.ts
 src/agents/model-auth-availability.ts
 src/agents/model-fallback.test.ts
 src/agents/model-selection-shared.ts
-src/agents/model-selection.test.ts
 src/agents/models.profiles.live.test.ts
 src/agents/openclaw-tools.session-status.test.ts
 src/agents/openclaw-tools.sessions.test.ts
