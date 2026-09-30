@@ -35,11 +35,7 @@ export async function applyCliExecutionStartupPresentation(params: {
     return;
   }
   const { emitCliBanner } = await import("./banner.js");
-  if (params.argv) {
-    emitCliBanner(params.version, { argv: params.argv });
-    return;
-  }
-  emitCliBanner(params.version);
+  emitCliBanner(params.version, params.argv ? { argv: params.argv } : undefined);
 }
 
 export async function ensureCliExecutionBootstrap(params: {

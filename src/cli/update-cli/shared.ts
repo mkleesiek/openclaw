@@ -92,10 +92,7 @@ export type UpdateCommandOptions = Pick<UpdateRunResult, "sourceRuntimePrepared"
   yes?: boolean;
 };
 
-export type UpdateStatusOptions = {
-  json?: boolean;
-  timeout?: string;
-};
+export type UpdateStatusOptions = Pick<UpdateCommandOptions, "json" | "timeout">;
 
 /** Only package updates hand admission to a privately staged candidate. */
 export function usesCandidateUpdateAdmission(
@@ -105,21 +102,18 @@ export function usesCandidateUpdateAdmission(
   return installKind === "package" && !opts.dryRun && opts.admission !== "installed";
 }
 
-export type UpdateFinalizeOptions = {
-  acceptCapabilities?: boolean;
-  json?: boolean;
-  channel?: string;
-  timeout?: string;
-  yes?: boolean;
+export type UpdateFinalizeOptions = Pick<
+  UpdateCommandOptions,
+  "acceptCapabilities" | "json" | "channel" | "timeout" | "yes"
+> & {
   /** Internal external-supervisor handshake; public repair always leaves this false. */
   deferCompletionCache?: boolean;
 };
 
-export type UpdateWizardOptions = {
-  runtimeRecoveryEnv?: NodeJS.ProcessEnv;
-  acceptCapabilities?: boolean;
-  timeout?: string;
-};
+export type UpdateWizardOptions = Pick<
+  UpdateCommandOptions,
+  "runtimeRecoveryEnv" | "acceptCapabilities" | "timeout"
+>;
 
 export class UpdatePreMutationError<Reason extends string = string> extends Error {
   readonly origin?: "candidate-admission";
@@ -290,13 +284,9 @@ type StagedGitCheckout = (
   storageRoot: string,
 ) => Promise<void>;
 
-async function cloneGitCheckoutTransactionally(params: {
-  dir: string;
-  timeoutMs: number;
-  progress?: UpdateStepProgress;
-  env?: NodeJS.ProcessEnv;
-  useStagedCheckout?: StagedGitCheckout;
-}): Promise<GitCheckoutResult> {
+async function cloneGitCheckoutTransactionally(
+  params: Parameters<typeof ensureGitCheckout>[0],
+): Promise<GitCheckoutResult> {
   const parentDir = path.dirname(params.dir);
   await fs.mkdir(parentDir, { recursive: true });
   const canonicalParentDir = await fs.realpath(parentDir);
@@ -398,16 +388,12 @@ async function cloneGitCheckoutTransactionally(params: {
         a === ".git" ? 1 : b === ".git" ? -1 : 0,
       );
       const moved: string[] = [];
-      let publishError: { value: unknown } | undefined;
       try {
         for (const entry of entries) {
           await fs.rename(path.join(stagingDir, entry), path.join(targetDir, entry));
           moved.push(entry);
         }
       } catch (error) {
-        publishError = { value: error };
-      }
-      if (publishError) {
         const rollbackErrors: unknown[] = [];
         for (const entry of moved.toReversed()) {
           try {
@@ -419,11 +405,11 @@ async function cloneGitCheckoutTransactionally(params: {
         if (rollbackErrors.length > 0) {
           cleanupStaging = false;
           throw new AggregateError(
-            [publishError.value, ...rollbackErrors],
+            [error, ...rollbackErrors],
             `Could not publish or fully roll back the cloned checkout at ${targetDir}; recovery files remain at ${stagingDir}`,
           );
         }
-        throw publishError.value;
+        throw error;
       }
       published = true;
       return targetDir;
