@@ -111,12 +111,15 @@ describe("original caller through Cron creator transports", () => {
           bindGatewayContextResolver(run, () => fixture.context);
           try {
             const issue = expectDefined(bindCronRequesterGrant(runId), "requester grant");
-            const runtimeIdentity = await createAgentRuntimeIdentity({
-              agentId: identity.agentId,
-              sessionKey: identity.sessionKey,
-              operationalRunInstance: identity.operationalRunInstance,
-              cronCreatorAuthorityGrant: issue(),
-            });
+            const runtimeIdentity = expectDefined(
+              await createAgentRuntimeIdentity({
+                agentId: identity.agentId,
+                sessionKey: identity.sessionKey,
+                operationalRunInstance: identity.operationalRunInstance,
+                cronCreatorAuthorityGrant: issue(),
+              }),
+              "remote requester runtime identity",
+            );
             expect(runtimeIdentity.cronToolsAllowCapture).toBeUndefined();
             const agentClient = createSyntheticPluginRuntimeClient({ scopes: ["operator.write"] });
             agentClient.internal!.agentRuntimeIdentity = runtimeIdentity;
