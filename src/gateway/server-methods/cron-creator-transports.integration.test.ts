@@ -1,6 +1,10 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
-import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withTestTimeout,
+} from "../../../test/helpers/promise.js";
 import {
   createOperationalRunInstanceRef,
   getAdmittedRunDelegatedAuthority,
@@ -62,8 +66,8 @@ describe("original caller through Cron creator transports", () => {
     async () => {
       const config: OpenClawConfig = { ...cfg };
       setRuntimeConfigSnapshot(config);
-      const entered = createDeferred<void>();
-      const release = createDeferred<void>();
+      const entered = createDeferred();
+      const release = createDeferred();
       let hold = false;
       const fixture = createCronFixture(async () => {
         if (hold) {
@@ -144,7 +148,11 @@ describe("original caller through Cron creator transports", () => {
             hold = true;
             const pending = invoke(agentClient, "Revoked requester");
             try {
-              await withTestTimeout(entered.promise, 10_000, "cron validation was not reached");
+              await awaitGateBeforeSettlement(
+                entered.promise,
+                pending,
+                "cron validation was not reached",
+              );
               invalidateGatewayDeviceRevocation(fixture.context, "requester-device", "operator");
             } finally {
               release.resolve();
