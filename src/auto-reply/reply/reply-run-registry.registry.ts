@@ -144,9 +144,7 @@ function allowsDirectMessageInjectionOwner(sessionKey: string): boolean {
 }
 
 export const replyRunRegistry: ReplyRunRegistry = {
-  begin(params) {
-    return createReplyOperation(params);
-  },
+  begin: createReplyOperation,
   get(sessionKey) {
     const normalizedSessionKey = normalizeOptionalString(sessionKey);
     if (!normalizedSessionKey) {
@@ -203,9 +201,7 @@ export const replyRunRegistry: ReplyRunRegistry = {
         resolve: (params) => resolveReplyMessageInjectionRejection({ ...params, operation }),
         recordAccepted: (options) => {
           operation.recordActivity();
-          if (options?.inboundAudio) {
-            operation.markAcceptedSteeredInboundAudio();
-          }
+          operation.markSteeredInputAccepted({ inboundAudio: options?.inboundAudio === true });
         },
         abort: () => operation.abortByUser(),
       },
@@ -218,11 +214,7 @@ export const replyRunRegistry: ReplyRunRegistry = {
     return operation ? { [replyRunInterruptTargetOperation]: operation } : undefined;
   },
   abort(sessionKey) {
-    const operation = this.get(sessionKey);
-    if (!operation) {
-      return false;
-    }
-    return operation.abortByUser();
+    return this.get(sessionKey)?.abortByUser() ?? false;
   },
   waitForIdle(sessionKey, timeoutMs, opts) {
     const normalizedSessionKey = normalizeOptionalString(sessionKey);
@@ -328,11 +320,7 @@ export function isReplyRunAbortableForCompaction(sessionId: string): boolean {
 }
 
 export function abortReplyRunBySessionId(sessionId: string): boolean {
-  const operation = resolveReplyRunForCurrentSessionId(sessionId);
-  if (!operation) {
-    return false;
-  }
-  return operation.abortByUser();
+  return resolveReplyRunForCurrentSessionId(sessionId)?.abortByUser() ?? false;
 }
 
 export { resolveReplyRunForCurrentSessionId as resolveActiveReplyOperationForSessionId };
@@ -363,10 +351,7 @@ export function waitForReplyRunEndBySessionId(
   timeoutMs?: number | null,
 ): Promise<boolean> {
   const waitKey = resolveReplyRunWaitKey(sessionId);
-  if (!waitKey) {
-    return Promise.resolve(true);
-  }
-  return replyRunRegistry.waitForIdle(waitKey, timeoutMs);
+  return waitKey ? replyRunRegistry.waitForIdle(waitKey, timeoutMs) : Promise.resolve(true);
 }
 
 async function waitForReplyRunAdmissionBarrier(params: {

@@ -13,6 +13,9 @@ import { hasMemorySessionTombstone } from "../memory-session-tombstones.js";
 import { publishMemoryDatabaseTables, readMemoryDatabaseRevision } from "./manager-db-kernel.js";
 import {
   clearMemoryEmbeddingCacheIdentities,
+  countMemoryEmbeddingCache,
+  loadMemoryEmbeddingCache,
+  pruneMemoryEmbeddingCache,
   upsertMemoryEmbeddingCache,
 } from "./manager-embedding-cache.js";
 import type {
@@ -25,6 +28,7 @@ import type {
 import { assertMemoryShadowIdentity, type MemoryShadowFailure } from "./manager-shadow-task.js";
 import {
   MemorySourceIndexKernel,
+  readMemorySourceHash,
   type MemorySourceIndexHeader,
   type MemorySourceIndexRow,
 } from "./manager-source-index-kernel.js";
@@ -178,6 +182,12 @@ function createPublicationBackend(
       },
       execute(command) {
         assertPath();
+        if (command.type === "source.hash") {
+          return readMemorySourceHash(db, command.input.source, command.input.path);
+        }
+        if (command.type === "cache.read") {
+          return loadMemoryEmbeddingCache({ ...command.input, db });
+        }
         if (command.type === "stage.start" || command.type === "cache.stage.start") {
           if (staged) {
             throw new Error("Memory publication input already belongs to another operation");
@@ -215,6 +225,22 @@ function createPublicationBackend(
             }
           }
           return undefined;
+        }
+        if (command.type === "cache.prune") {
+          if (countMemoryEmbeddingCache(db) <= command.input.maxEntries) {
+            return { ok: true, value: false };
+          }
+          return transact((hooks) =>
+            runSqliteImmediateTransactionSync(
+              db,
+              () => {
+                hooks.onBegin();
+                pruneMemoryEmbeddingCache(db, command.input.maxEntries);
+                return true;
+              },
+              { withCommit: hooks.withCommit },
+            ),
+          );
         }
         if (command.type === "cache.clear") {
           return transact((hooks) =>
