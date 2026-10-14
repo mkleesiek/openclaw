@@ -247,6 +247,68 @@ it("sums serial size-aware schema inspection budgets without giant fixtures", ()
   ).toBe(MAX_TIMER_TIMEOUT_MS);
 });
 
+describe("argument-fed synchronous SQLite workers", () => {
+  it.each([
+    { mode: "sync", result: { ok: true, location: "private.sqlite" }, value: "private.sqlite" },
+    {
+      mode: "content-version",
+      result: { ok: true, contentVersion: "a".repeat(64) },
+      value: "a".repeat(64),
+    },
+    {
+      mode: "file-generation",
+      result: { ok: true, generation: "fixture-generation" },
+      value: "fixture-generation",
+    },
+  ] as const)("captures $mode output without an unused stdin pipe", ({ mode, result, value }) => {
+    const stdout = JSON.stringify(result);
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      pid: 1,
+      output: [null, stdout, ""],
+      stdout,
+      stderr: "",
+      status: 0,
+      signal: null,
+    });
+
+    expect(runSqliteReadOnlyWorkerSync("source.sqlite", undefined, mode)).toBe(value);
+    // This process boundary must not require shutdown() on a piped stdin in restricted hosts.
+    expect(vi.mocked(spawnSync).mock.calls[0]?.[2]?.stdio).toEqual(["ignore", "pipe", "pipe"]);
+  });
+
+  it.each(["EPERM", "ENOBUFS"])("retains %s despite status 0 and valid JSON", (code) => {
+    const error = Object.assign(new Error(`spawnSync ${code}`), { code });
+    const stdout = '{"ok":true,"location":"private.sqlite"}';
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      pid: 1,
+      output: [null, stdout, ""],
+      stdout,
+      stderr: "",
+      status: 0,
+      signal: null,
+      error,
+    });
+
+    expect(() => runSqliteReadOnlyWorkerSync("source.sqlite", undefined)).toThrow(
+      expect.objectContaining({ cause: error }),
+    );
+  });
+
+  it("rejects an empty response even when the child exits successfully", () => {
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      pid: 1,
+      output: [null, "", ""],
+      stdout: "",
+      stderr: "",
+      status: 0,
+      signal: null,
+    });
+    expect(() => runSqliteReadOnlyWorkerSync("source.sqlite", undefined)).toThrow(
+      "returned no JSON result",
+    );
+  });
+});
+
 it("preserves an intermittent failed launch without parsing absent worker output", async () => {
   const source = createDatabase(null);
   const stagingRoot = tempDirs.make("openclaw-snapshot-launch-");

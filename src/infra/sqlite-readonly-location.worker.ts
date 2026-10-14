@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { deserialize } from "node:v8";
@@ -411,7 +412,12 @@ if (process.argv[2] === SQLITE_READONLY_CHILD_ARG) {
       if (!result.ok) {
         process.exitCode = 1;
       }
-      process.stdout.write(JSON.stringify(result));
+      if (process.argv[3] === "sync") {
+        // Argument-fed synchronous callers need a complete reply even with an unknown stdout handle.
+        writeFileSync(1, JSON.stringify(result));
+      } else {
+        process.stdout.write(JSON.stringify(result));
+      }
     });
   }
 }

@@ -1,5 +1,11 @@
+import fs, { writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
+});
 
 const { prepare, prepareCopy, createToken, SourceChangedError } = vi.hoisted(() => ({
   prepare: vi.fn(),
@@ -24,6 +30,7 @@ afterEach(() => {
   process.argv = originalArgv;
   process.exitCode = originalExitCode;
   vi.restoreAllMocks();
+  vi.mocked(writeFileSync).mockReset();
   prepare.mockReset();
   prepareCopy.mockReset();
   createToken.mockReset();
@@ -47,7 +54,24 @@ async function expectWorkerFailure(
     mode,
     "/synthetic/database.sqlite",
   ];
-  const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  let captured = "";
+  vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    // Node's unknown-handle Writable acknowledges sync-child output without delivering bytes.
+    if (mode !== "sync") {
+      captured += String(chunk);
+    }
+    return true;
+  });
+  vi.mocked(writeFileSync).mockImplementation((file, data, writeOptions) => {
+    if (file === 1) {
+      captured +=
+        typeof data === "string"
+          ? data
+          : Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString();
+    } else {
+      fs.writeFileSync(file, data, writeOptions);
+    }
+  });
   if (mode === "staging-create" || mode === "staging-create-legacy") {
     createToken.mockImplementationOnce(() => {
       throw error;
@@ -68,7 +92,7 @@ async function expectWorkerFailure(
     ok: false,
     message: `${prefix}${message}`,
   });
-  expect(write).toHaveBeenCalledExactlyOnceWith(stdout);
+  expect(captured).toBe(stdout);
   expect(process.exitCode).toBe(1);
   const { readSqliteReadOnlyWorkerValue, SqliteReadOnlyInspectionContentionError } =
     await import("./sqlite-readonly-worker-protocol.js");
