@@ -1,4 +1,4 @@
-import fs, { writeFileSync } from "node:fs";
+import fs, { writeSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { FsSafeError } from "@openclaw/fs-safe/errors";
@@ -11,7 +11,7 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
+  return { ...actual, writeSync: vi.fn(actual.writeSync) };
 });
 
 vi.mock("./node-sqlite.js", async (importOriginal) => {
@@ -30,7 +30,7 @@ const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
     process.exitCode = originalExitCode;
     __setFsSafeTestHooksForTest(undefined);
     vi.restoreAllMocks();
-    vi.mocked(writeFileSync).mockReset();
+    vi.mocked(writeSync).mockReset();
     cleanup();
   });
 });
@@ -91,16 +91,18 @@ async function inspectFailure(
     capture(String(chunk));
     return true;
   });
-  vi.mocked(writeFileSync).mockImplementation((file, data, options) => {
-    if (file === 1) {
-      capture(
-        typeof data === "string"
-          ? data
-          : Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString(),
-      );
-    } else {
-      fs.writeFileSync(file, data, options);
+  vi.mocked(writeSync).mockImplementation((file, data, offset, length) => {
+    if (file !== 1) {
+      throw new Error("Unexpected descriptor in worker output fixture");
     }
+    const bytes =
+      typeof data === "string"
+        ? Buffer.from(data)
+        : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    const start = typeof offset === "number" ? offset : 0;
+    const chunk = bytes.subarray(start, start + (length ?? bytes.length));
+    capture(chunk.toString());
+    return chunk.length;
   });
   process.argv = [
     process.execPath,

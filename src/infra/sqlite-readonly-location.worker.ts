@@ -1,4 +1,3 @@
-import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { deserialize } from "node:v8";
@@ -45,6 +44,7 @@ import {
   assertExistingDatabaseIdentity,
   readDatabaseFileIdentity,
 } from "./sqlite-worker-identity.js";
+import { writeSqliteWorkerResponse } from "./sqlite-worker-stdout.js";
 import { createSqliteWorkerTransferOwner } from "./sqlite-worker-transfer.js";
 
 const stagingTokens = new Map<string, SqliteStagingToken>();
@@ -408,13 +408,12 @@ if (process.argv[2] === SQLITE_READONLY_CHILD_ARG) {
   if (process.argv[3] === "session" && process.send) {
     runSession();
   } else {
-    void inspect(process.argv.slice(3)).then((result) => {
+    void inspect(process.argv.slice(3)).then(async (result) => {
       if (!result.ok) {
         process.exitCode = 1;
       }
       if (process.argv[3] === "sync") {
-        // Argument-fed synchronous callers need a complete reply even with an unknown stdout handle.
-        writeFileSync(1, JSON.stringify(result));
+        await writeSqliteWorkerResponse(result);
       } else {
         process.stdout.write(JSON.stringify(result));
       }

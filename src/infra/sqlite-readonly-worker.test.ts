@@ -56,6 +56,25 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
+it.runIf(process.platform === "linux")(
+  "preserves a large diagnostic across nonblocking worker stdout",
+  () => {
+    // JSON escaping makes this reply larger than a normal pipe/socket buffer,
+    // while the argv path remains below Linux's per-argument limit.
+    const pathname = `${tempDirs.make("sqlite-large-diagnostic-")}/${"\u0001".repeat(90_000)}`;
+    let failure: unknown;
+    try {
+      runSqliteReadOnlyWorkerSync(pathname, undefined, "file-generation");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(pathname);
+    expect((failure as Error).message).toContain("ENAMETOOLONG");
+  },
+);
+
 beforeEach(() => {
   vi.mocked(execFile).mockReset();
   vi.mocked(spawn).mockClear();

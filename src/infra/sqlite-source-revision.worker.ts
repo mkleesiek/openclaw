@@ -1,5 +1,4 @@
 // Keep this child independent of SQLite and the shared runtime import graph.
-import { writeFileSync } from "node:fs";
 import { SQLITE_READONLY_CHILD_ARG } from "./runtime-process-entrypoints.js";
 import {
   readStableSqliteFileGeneration,
@@ -7,6 +6,7 @@ import {
 } from "./sqlite-file-generation.js";
 import type { SqliteReadOnlyWorkerResult } from "./sqlite-readonly-worker-protocol.js";
 import { readSqliteSourceContentVersionInProcess } from "./sqlite-source-revision.js";
+import { writeSqliteWorkerResponse } from "./sqlite-worker-stdout.js";
 
 if (process.argv[2] === SQLITE_READONLY_CHILD_ARG) {
   let result: SqliteReadOnlyWorkerResult;
@@ -27,6 +27,5 @@ if (process.argv[2] === SQLITE_READONLY_CHILD_ARG) {
     process.exitCode = 1;
     result = { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
-  // Restricted hosts can classify stdout as an unknown handle and silently discard stream writes.
-  writeFileSync(1, JSON.stringify(result));
+  await writeSqliteWorkerResponse(result);
 }

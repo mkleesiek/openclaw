@@ -1,10 +1,10 @@
-import fs, { writeFileSync } from "node:fs";
+import { writeSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
+  return { ...actual, writeSync: vi.fn(actual.writeSync) };
 });
 
 const { prepare, prepareCopy, createToken, SourceChangedError } = vi.hoisted(() => ({
@@ -30,7 +30,7 @@ afterEach(() => {
   process.argv = originalArgv;
   process.exitCode = originalExitCode;
   vi.restoreAllMocks();
-  vi.mocked(writeFileSync).mockReset();
+  vi.mocked(writeSync).mockReset();
   prepare.mockReset();
   prepareCopy.mockReset();
   createToken.mockReset();
@@ -62,15 +62,18 @@ async function expectWorkerFailure(
     }
     return true;
   });
-  vi.mocked(writeFileSync).mockImplementation((file, data, writeOptions) => {
-    if (file === 1) {
-      captured +=
-        typeof data === "string"
-          ? data
-          : Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString();
-    } else {
-      fs.writeFileSync(file, data, writeOptions);
+  vi.mocked(writeSync).mockImplementation((file, data, offset, length) => {
+    if (file !== 1) {
+      throw new Error("Unexpected descriptor in worker output fixture");
     }
+    const bytes =
+      typeof data === "string"
+        ? Buffer.from(data)
+        : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    const start = typeof offset === "number" ? offset : 0;
+    const chunk = bytes.subarray(start, start + (length ?? bytes.length));
+    captured += chunk.toString();
+    return chunk.length;
   });
   if (mode === "staging-create" || mode === "staging-create-legacy") {
     createToken.mockImplementationOnce(() => {
