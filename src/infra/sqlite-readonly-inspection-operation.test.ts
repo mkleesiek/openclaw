@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs, { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { FsSafeError } from "@openclaw/fs-safe/errors";
@@ -8,6 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
+});
 
 vi.mock("./node-sqlite.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./node-sqlite.js")>();
@@ -25,6 +30,7 @@ const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
     process.exitCode = originalExitCode;
     __setFsSafeTestHooksForTest(undefined);
     vi.restoreAllMocks();
+    vi.mocked(writeFileSync).mockReset();
     cleanup();
   });
 });
@@ -76,9 +82,25 @@ async function inspectFailure(
   const diagnostics = await import("./sqlite-error-diagnostics.js");
   const format = vi.spyOn(diagnostics, "formatSqliteReadOnlyInspectionFailure");
   const completed = createDeferred();
-  const write = vi.spyOn(process.stdout, "write").mockImplementation(() => {
+  let stdout = "";
+  const capture = (chunk: string) => {
+    stdout += chunk;
     completed.resolve();
+  };
+  vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    capture(String(chunk));
     return true;
+  });
+  vi.mocked(writeFileSync).mockImplementation((file, data, options) => {
+    if (file === 1) {
+      capture(
+        typeof data === "string"
+          ? data
+          : Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString(),
+      );
+    } else {
+      fs.writeFileSync(file, data, options);
+    }
   });
   process.argv = [
     process.execPath,
@@ -104,7 +126,7 @@ async function inspectFailure(
     } finally {
       read.close();
     }
-    return { write, observedFailure };
+    return { stdout, observedFailure };
   } finally {
     for (const database of opened) {
       if (database.isOpen) {
@@ -138,11 +160,11 @@ describe("registered SQLite read-only worker operation diagnostics", () => {
               new FsSafeError("helper-failed", "native copy failed", { cause: nativeFailure }),
             )
           : nativeFailure;
-      const { write, observedFailure } = await inspectFailure(operation, failure);
+      const { stdout, observedFailure } = await inspectFailure(operation, failure);
       expect(observedFailure).toBe(failure);
       const message =
         operation === "snapshot-copy" ? "native copy failed" : "unable to open database file";
-      expect(write).toHaveBeenCalledExactlyOnceWith(
+      expect(stdout).toBe(
         JSON.stringify({
           ok: false,
           message: `failed while ${context}: ${message} (code=ERR_SQLITE_ERROR, errcode=14)`,
@@ -156,14 +178,12 @@ describe("registered SQLite read-only worker operation diagnostics", () => {
     const failure = Object.freeze(
       new AggregateError([cause, new Error("hidden cleanup")], "read failed", { cause }),
     );
-    const { write, observedFailure } = await inspectFailure("backup-source", failure);
+    const { stdout, observedFailure } = await inspectFailure("backup-source", failure);
     expect(observedFailure instanceof Error && observedFailure.cause).toBe(failure);
-    expect(write).toHaveBeenCalledExactlyOnceWith(
-      expect.stringContaining(
-        "failed while opening the source database: read failed (SQLite errcode=778)",
-      ),
+    const message = JSON.parse(stdout).message as string;
+    expect(message).toContain(
+      "failed while opening the source database: read failed (SQLite errcode=778)",
     );
-    const [message] = expectDefined(write.mock.calls[0], "worker output");
     expect(message).toContain("code=EIO, errcode=778");
     expect(message).not.toContain("hidden cause prose");
     expect(message).not.toContain("hidden cleanup");
