@@ -62,19 +62,27 @@ async function expectWorkerFailure(
     }
     return true;
   });
-  vi.mocked(writeSync).mockImplementation((file, data, offset, length) => {
-    if (file !== 1) {
-      throw new Error("Unexpected descriptor in worker output fixture");
-    }
-    const bytes =
-      typeof data === "string"
-        ? Buffer.from(data)
-        : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
-    const start = typeof offset === "number" ? offset : 0;
-    const chunk = bytes.subarray(start, start + (length ?? bytes.length));
-    captured += chunk.toString();
-    return chunk.length;
-  });
+  vi.mocked(writeSync).mockImplementation(
+    (
+      file: number,
+      data: string | NodeJS.ArrayBufferView,
+      offset?: number | null,
+      length?: number | BufferEncoding | null,
+    ) => {
+      if (file !== 1) {
+        throw new Error("Unexpected descriptor in worker output fixture");
+      }
+      const bytes =
+        typeof data === "string"
+          ? Buffer.from(data, typeof length === "string" ? length : undefined)
+          : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+      const start = typeof data === "string" ? 0 : (offset ?? 0);
+      const size = typeof length === "number" ? length : bytes.length;
+      const chunk = bytes.subarray(start, start + size);
+      captured += chunk.toString();
+      return chunk.length;
+    },
+  );
   if (mode === "staging-create" || mode === "staging-create-legacy") {
     createToken.mockImplementationOnce(() => {
       throw error;

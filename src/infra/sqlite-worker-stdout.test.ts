@@ -17,20 +17,28 @@ it("preserves exact UTF-8 bytes across partial writes and temporary backpressure
   const result = { ok: false as const, message: "Grüße ⚡" };
   const chunks: Buffer[] = [];
   const outcomes = [26, "EAGAIN", "EWOULDBLOCK", 0, 1];
-  vi.mocked(writeSync).mockImplementation((_fd, data, offset, length) => {
-    const outcome = outcomes.shift();
-    if (typeof outcome === "string") {
-      throw Object.assign(new Error(outcome), { code: outcome });
-    }
-    const bytes =
-      typeof data === "string"
-        ? Buffer.from(data)
-        : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
-    const start = typeof offset === "number" ? offset : 0;
-    const count = Math.min(outcome ?? bytes.length, length ?? bytes.length);
-    chunks.push(bytes.subarray(start, start + count));
-    return count;
-  });
+  vi.mocked(writeSync).mockImplementation(
+    (
+      _fd: number,
+      data: string | NodeJS.ArrayBufferView,
+      offset?: number | null,
+      length?: number | BufferEncoding | null,
+    ) => {
+      const outcome = outcomes.shift();
+      if (typeof outcome === "string") {
+        throw Object.assign(new Error(outcome), { code: outcome });
+      }
+      const bytes =
+        typeof data === "string"
+          ? Buffer.from(data, typeof length === "string" ? length : undefined)
+          : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+      const start = typeof data === "string" ? 0 : (offset ?? 0);
+      const size = typeof length === "number" ? length : bytes.length;
+      const count = Math.min(outcome ?? bytes.length, size);
+      chunks.push(bytes.subarray(start, start + count));
+      return count;
+    },
+  );
   const sent = writeSqliteWorkerResponse(result);
   await vi.runAllTimersAsync();
   await sent;
