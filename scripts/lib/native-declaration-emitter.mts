@@ -27,6 +27,80 @@ type NativeCompilationOptions = {
   emit?: boolean;
 };
 
+/** Temporary CI diagnosis: observe the worker and direct native children, never source text. */
+function startDeclarationDiagnostics() {
+  let phase = "setup";
+  const started = performance.now();
+  const enabled = process.env.OPENCLAW_NATIVE_DECLARATION_DIAGNOSTICS === "1";
+  const readChildren = () => {
+    if (process.platform !== "linux") {
+      return null;
+    }
+    try {
+      return fs
+        .readFileSync("/proc/thread-self/children", "utf8")
+        .trim()
+        .split(/\s+/u)
+        .filter(Boolean)
+        .slice(0, 32)
+        .map((pid) => {
+          try {
+            const status = fs.readFileSync(`/proc/${pid}/status`, "utf8");
+            const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+            // Field 3 follows the final ')' of comm; CPU fields 14/15 cover all threads.
+            const fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/u);
+            return {
+              pid: Number(pid),
+              cpuUserTicks: Number(fields[11]),
+              cpuSystemTicks: Number(fields[12]),
+              rssKiB: /^VmRSS:\s+(\d+)/mu.exec(status)?.[1] ?? null,
+              peakRssKiB: /^VmHWM:\s+(\d+)/mu.exec(status)?.[1] ?? null,
+            };
+          } catch {
+            return { pid: Number(pid), unavailable: true };
+          }
+        });
+    } catch {
+      // Missing procfs or an exited child is unknown, not zero resource use.
+      return null;
+    }
+  };
+  const sample = () => {
+    if (!enabled) {
+      return;
+    }
+    try {
+      console.error(
+        "native-declaration-diagnostic " +
+          JSON.stringify({
+            pid: process.pid,
+            phase,
+            elapsedMs: Math.round(performance.now() - started),
+            nodeCpuUs: process.cpuUsage(),
+            nodeRssBytes: process.memoryUsage().rss,
+            directChildren: readChildren(),
+          }),
+      );
+    } catch {
+      // Diagnostic I/O must not replace compiler results or errors.
+    }
+  };
+  sample();
+  const timer = enabled ? setInterval(sample, 30_000) : undefined;
+  timer?.unref();
+  return {
+    phase(next: string) {
+      phase = next;
+      sample();
+    },
+    stop() {
+      if (timer) {
+        clearInterval(timer);
+      }
+    },
+  };
+}
+
 /** Compile behind one filesystem boundary; callers publish only successful results. */
 export async function compileNativeProject({
   cwd,
@@ -50,6 +124,7 @@ export async function compileNativeProject({
   const artifacts = admit(path.join(root, ".artifacts"));
   fs.mkdirSync(artifacts, { recursive: true });
   const stage = fs.mkdtempSync(path.join(artifacts, "native-declarations-"));
+  const diagnostic = startDeclarationDiagnostics();
   let api: API | undefined;
   let view: ReturnType<typeof createDeclarationFileSystem> | undefined;
   try {
@@ -87,6 +162,7 @@ export async function compileNativeProject({
       }
     }
     api = new API({ cwd: root, tsserverPath: binary, fs: view.filesystem });
+    diagnostic.phase("config");
     const configured = await api.parseConfigFile(config);
     view.assertValid();
     const typeRoots = configured.options.typeRoots?.map(admit);
@@ -129,6 +205,7 @@ export async function compileNativeProject({
         },
       }),
     );
+    diagnostic.phase("snapshot");
     const nativeSnapshot = await api.createSnapshot({
       openProjects: [config],
       fileNotifications: { changed: [config] },
@@ -139,6 +216,7 @@ export async function compileNativeProject({
     if (!project) {
       throw new Error(`Native TypeScript did not open ${config}`);
     }
+    diagnostic.phase("diagnostics");
     const errors = await collectNativeTypeScriptDiagnosticsAsync(project, {
       includeSemantic: diagnostics === "all",
     });
@@ -148,7 +226,9 @@ export async function compileNativeProject({
     }
     const outputFiles = new Map<string, EmitOutputFile>();
     if (emit) {
+      diagnostic.phase("emit");
       const result = await project.program.emitToString(EmitOnly.OnlyDts);
+      diagnostic.phase("outputs");
       view.assertValid();
       if (result.emitSkipped || result.diagnostics.length) {
         throw new Error(
@@ -174,6 +254,7 @@ export async function compileNativeProject({
         outputFiles.set(accepted, contents);
       }
     }
+    diagnostic.phase("membership");
     for (const file of await project.program.getSourceFileNames()) {
       const accepted = admit(file);
       if (assertInput && !view.inputs.has(accepted)) {
@@ -184,6 +265,7 @@ export async function compileNativeProject({
       view.inputs.add(accepted);
     }
     view.assertValid();
+    diagnostic.phase("close");
     await api.close();
     api = undefined;
     const consumedInputs = view.inputs;
@@ -191,14 +273,17 @@ export async function compileNativeProject({
     if (canonicalRoots.some((file) => !consumedInputs.has(file))) {
       throw new Error("Incomplete native compiler source membership");
     }
+    diagnostic.phase("complete");
     return { inputs, outputFiles, lookups: view.getLookups() };
   } catch (error) {
+    diagnostic.phase("failed");
     view?.assertValid();
     throw error;
   } finally {
     try {
       await api?.close();
     } finally {
+      diagnostic.stop();
       fs.rmSync(stage, { recursive: true, force: true });
     }
   }

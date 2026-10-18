@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createDeclarationInputBoundary } from "../../scripts/lib/local-check-runtime.mts";
 import { emitNativeDeclarations } from "../../scripts/lib/native-declaration-emitter.mts";
 import { readNativeTypeScriptConfig } from "../../scripts/lib/native-typescript-config.mts";
@@ -224,7 +224,44 @@ it("emits identical inferred declarations and maps across fresh compiler process
     );
   }
   const first = await fixture.compile();
-  const second = await fixture.compile();
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.stubEnv("OPENCLAW_NATIVE_DECLARATION_DIAGNOSTICS", "1");
+  let second;
+  try {
+    second = await fixture.compile();
+    const samples = log.mock.calls
+      .filter(
+        ([prefix]) =>
+          typeof prefix === "string" && prefix.startsWith("native-declaration-diagnostic "),
+      )
+      .map(([line]) => JSON.parse(String(line).slice("native-declaration-diagnostic ".length)));
+    expect(samples.map((sample) => sample.phase)).toEqual([
+      "setup",
+      "config",
+      "snapshot",
+      "diagnostics",
+      "emit",
+      "outputs",
+      "membership",
+      "close",
+      "complete",
+    ]);
+    expect(samples.every((sample) => sample.elapsedMs >= 0 && sample.nodeRssBytes > 0)).toBe(true);
+    if (process.platform === "linux") {
+      expect(
+        samples.some((sample) =>
+          sample.directChildren?.some(
+            (child: { cpuUserTicks?: number; rssKiB?: string }) =>
+              typeof child.cpuUserTicks === "number" && Number(child.rssKiB) > 0,
+          ),
+        ),
+      ).toBe(true);
+    }
+    expect(JSON.stringify(samples)).not.toContain(root);
+  } finally {
+    vi.unstubAllEnvs();
+    log.mockRestore();
+  }
   expect(first.declarations.size).toBe(modules.length + 1);
   expect(second.declarations).toEqual(first.declarations);
   expect(second.inputs).toEqual(first.inputs);
