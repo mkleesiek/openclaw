@@ -2,8 +2,8 @@ import { Show, Switch, Match, createMemo } from "solid-js";
 import type { AgentIdentityResult, AgentsListResult } from "../../api/types.ts";
 import { subtitleForRoute, titleForRoute } from "../../app-navigation.ts";
 import { ShellLayoutBoundary } from "../../app/shell-layout-traits-solid.tsx";
-import { handleCopyButton } from "../../components/copy-button.ts";
-import { renderHubTabs } from "../../components/hub-tabs.ts";
+import { handleCopyButton } from "../../components/copy-button-state.ts";
+import { HubTabs } from "../../components/solid/hub-tabs.tsx";
 import {
   SettingsEmpty,
   SettingsSection,
@@ -19,8 +19,9 @@ import {
   type RuntimeConfigState,
 } from "../../lib/config/config-state-model.ts";
 import { t } from "../../lib/reactive/i18n.ts";
-import { LitContent } from "../../lit/solid-bridge.ts";
+import { ReasonedDisabledControl } from "../plugins/reasoned-disabled-control.tsx";
 import type { AgentConfigActions } from "./config-actions.tsx";
+import type { AgentMemoryTarget } from "./memory/memory-panel-state.ts";
 import { AgentMemoryPanel } from "./memory/memory-panel.tsx";
 import { AgentFiles } from "./panels-files.tsx";
 import { AgentOverview } from "./panels-overview.tsx";
@@ -44,6 +45,7 @@ export type AgentsProps = {
   error: string | null;
   agentsList: AgentsListResult | null;
   selectedAgentId: string | null;
+  memoryTarget: AgentMemoryTarget;
   activePanel: AgentsPanel;
   config: Pick<
     RuntimeConfigState,
@@ -148,28 +150,38 @@ export function Agents(props: AgentsProps) {
       <section class="agents-toolbar">
         <div class="agents-toolbar-row">
           <div class="agents-toolbar-actions">
-            <Show when={props.access.canCreateAgent}>
+            <ReasonedDisabledControl
+              reason={!props.access.canCreateAgent ? t("custodian.accessRequired") : undefined}
+            >
               <button
                 class="btn btn--sm btn--ghost agents-create-btn"
-                disabled={props.loading}
+                disabled={props.loading || !props.access.canCreateAgent}
+                title={!props.access.canCreateAgent ? t("custodian.accessRequired") : undefined}
                 onClick={() => props.onCreateAgent()}
               >
                 {t("custodian.newAgent")}
               </button>
-            </Show>
+            </ReasonedDisabledControl>
             <Show when={selectedAgent()}>
               {(agent) => (
                 <>
                   <Show when={agent().id} keyed>
-                    {(id) => (
-                      <button
-                        type="button"
-                        class="btn btn--sm btn--ghost"
-                        onClick={(event) => void handleCopyButton(event, id, t("agents.copyId"))}
-                      >
-                        <span data-copy-label>{t("agents.copyId")}</span>
-                      </button>
-                    )}
+                    {(id) => {
+                      let label!: HTMLSpanElement;
+                      return (
+                        <button
+                          type="button"
+                          class="btn btn--sm btn--ghost"
+                          onClick={(event) =>
+                            void handleCopyButton(event, id, t("agents.copyId"), { label })
+                          }
+                        >
+                          <span ref={(element) => (label = element)} data-copy-label>
+                            {t("agents.copyId")}
+                          </span>
+                        </button>
+                      );
+                    }}
                   </Show>
                   <button
                     type="button"
@@ -226,27 +238,25 @@ export function Agents(props: AgentsProps) {
         >
           {(agent) => (
             <>
-              <LitContent
-                render={() =>
-                  renderHubTabs({
-                    id: "agents",
-                    active: props.activePanel,
-                    tabs: (
-                      [
-                        ["overview", "agents.tabs.overview"],
-                        ["files", "agents.tabs.files"],
-                        ["tools", "agents.tabs.tools"],
-                        ["skills", "agents.tabs.skills"],
-                        ["channels", "agents.tabs.channels"],
-                        ["cron", "agents.tabs.cronJobs"],
-                        ["memory", "agents.tabs.memory"],
-                      ] as const
-                    ).map(([value, key]) => ({ value, label: t(key), count: tabCounts()[value] })),
-                    ariaLabel: t("tabs.agents"),
-                    panelId: "agent-panel",
-                    onSelect: props.onSelectPanel,
-                  })
-                }
+              <HubTabs
+                {...{
+                  id: "agents",
+                  active: props.activePanel,
+                  tabs: (
+                    [
+                      ["overview", "agents.tabs.overview"],
+                      ["files", "agents.tabs.files"],
+                      ["tools", "agents.tabs.tools"],
+                      ["skills", "agents.tabs.skills"],
+                      ["channels", "agents.tabs.channels"],
+                      ["cron", "agents.tabs.cronJobs"],
+                      ["memory", "agents.tabs.memory"],
+                    ] as const
+                  ).map(([value, key]) => ({ value, label: t(key), count: tabCounts()[value] })),
+                  ariaLabel: t("tabs.agents"),
+                  panelId: "agent-panel",
+                  onSelect: props.onSelectPanel,
+                }}
               />
               <div
                 id="agent-panel"
@@ -324,7 +334,7 @@ export function Agents(props: AgentsProps) {
                         onClick={() => props.onOpenMemoryImport?.()}
                       />
                     </div>
-                    <AgentMemoryPanel agentId={agent().id} />
+                    <AgentMemoryPanel initialAgentTarget={props.memoryTarget} />
                   </Match>
                 </Switch>
               </div>

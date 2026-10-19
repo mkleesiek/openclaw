@@ -103,6 +103,11 @@ describe("openclaw-file-preview-modal", () => {
 
   it("emits controlled query, select, and close events", async () => {
     const modal = await renderPreview();
+    const actions = modal.querySelector(".foot > openclaw-modal-actions");
+    expect(actions?.querySelector("button")).not.toBeNull();
+    expect(actions?.parentElement?.lastElementChild).toBe(actions);
+    expect(actions?.querySelector(".foot-group")).toBeNull();
+    expect(modal.querySelector(".foot > .foot-group")).not.toBeNull();
     const onQuery = vi.fn();
     const onSelect = vi.fn();
     const onClose = vi.fn();
@@ -126,6 +131,54 @@ describe("openclaw-file-preview-modal", () => {
     expect(onQuery.mock.lastCall?.[0].detail).toBe("digest");
     expect(onSelect.mock.lastCall?.[0].detail).toBe("filters/auto-senders.txt");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["files", "document"] as const)(
+    "updates the active %s preview and focus without untracked reads",
+    async (layout) => {
+      const warning = vi.spyOn(console, "warn");
+      const modal = await renderPreview({ layout });
+      modal.activePath = files[1]!.path;
+      await modal.updateComplete;
+
+      expect(modal.querySelector(".detail-body")?.textContent).toContain("noreply@example.com");
+      expect(document.activeElement).toBe(
+        modal.querySelector(layout === "files" ? ".search" : ".item.is-active"),
+      );
+      expect(warning.mock.calls.flat().join(" ")).not.toContain("STRICT_READ_UNTRACKED");
+    },
+  );
+
+  it("reveals active rows on list updates and only refocuses changed document paths", async () => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    const modal = await renderPreview();
+    const focusTarget = modal.querySelector<HTMLElement>(".modal")!;
+    focusTarget.tabIndex = 0;
+    focusTarget.focus();
+
+    scroll.mockClear();
+    modal.query = "digest";
+    await modal.updateComplete;
+    expect(scroll.mock.contexts.at(-1)).toBe(modal.querySelector(".item.is-active"));
+    expect(document.activeElement).toBe(focusTarget);
+
+    scroll.mockClear();
+    modal.files = files.map((file) => ({ ...file, size: "3 KB" }));
+    await modal.updateComplete;
+    expect(scroll.mock.contexts.at(-1)).toBe(modal.querySelector(".item.is-active"));
+    expect(document.activeElement).toBe(focusTarget);
+
+    scroll.mockClear();
+    modal.layout = "document";
+    await modal.updateComplete;
+    expect(scroll.mock.contexts.at(-1)).toBe(modal.querySelector(".item.is-active"));
+    expect(document.activeElement).toBe(focusTarget);
+
+    scroll.mockClear();
+    modal.activePath = files[1]!.path;
+    await modal.updateComplete;
+    expect(scroll.mock.contexts.at(-1)).toBe(modal.querySelector(".item.is-active"));
+    expect(document.activeElement).toBe(modal.querySelector(".item.is-active"));
   });
 
   it("restores modal focus when the same element reconnects", async () => {
@@ -187,24 +240,30 @@ describe("openclaw-file-preview-modal", () => {
     expect(secondChunks.map((chunk) => chunk.textContent ?? "").join("\n")).toBe(secondContents);
   });
 
-  it("keeps the current document and scroll position when a sibling file finishes loading", async () => {
-    const modal = await renderPreview();
-    const body = modal.querySelector<HTMLElement>(".detail-body")!;
-    body.scrollTop = 240;
-    body.scrollLeft = 40;
+  it.each(["files", "document"] as const)(
+    "keeps the current %s content and scroll position when a sibling file finishes loading",
+    async (layout) => {
+      const modal = await renderPreview({ layout });
+      const body = modal.querySelector<HTMLElement>(".detail-body")!;
+      const content = body.querySelector(".markdown, .code-content")!;
+      const first = content.firstElementChild;
+      body.scrollTop = 240;
+      body.scrollLeft = 40;
 
-    modal.files = files.map((file) => ({
-      path: file.path,
-      size: file.size,
-      contents: file.path === modal.activePath ? file.contents : "New sibling contents",
-    }));
-    await modal.updateComplete;
+      modal.files = files.map((file) => ({
+        path: file.path,
+        size: file.size,
+        contents: file.path === modal.activePath ? file.contents : "New sibling contents",
+      }));
+      await modal.updateComplete;
 
-    expect(modal.querySelector(".detail-body")).toBe(body);
-    expect(body.scrollTop).toBe(240);
-    expect(body.scrollLeft).toBe(40);
-    expect(body.textContent).toContain("Morning digest template");
-  });
+      expect(modal.querySelector(".detail-body")).toBe(body);
+      expect(content.firstElementChild).toBe(first);
+      expect(body.scrollTop).toBe(240);
+      expect(body.scrollLeft).toBe(40);
+      expect(body.textContent).toContain("Morning digest template");
+    },
+  );
 
   it("navigates only expanded document folders and keeps relative Markdown links inside the preview", async () => {
     const modal = await renderPreview({

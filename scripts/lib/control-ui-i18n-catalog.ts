@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBaseHints } from "../../src/config/schema.hints.js";
+import { PUBLIC_SESSION_COPY } from "../../src/shared/public-session-copy.ts";
 import { configHintTranslationKey } from "../../ui/src/i18n/lib/config-hint-translation.ts";
 import { registerActivityEnglish } from "../../ui/src/i18n/locales/en-activity.ts";
 import { registerAgentsHomeEnglish } from "../../ui/src/i18n/locales/en-agents-home.ts";
@@ -21,6 +22,7 @@ import { registerDesktopEnglish } from "../../ui/src/i18n/locales/en-desktop.ts"
 import { registerDevicesEnglish } from "../../ui/src/i18n/locales/en-devices.ts";
 import { registerDreamingEnglish } from "../../ui/src/i18n/locales/en-dreaming.ts";
 import { registerFilePreviewEnglish } from "../../ui/src/i18n/locales/en-file-preview.ts";
+import { registerGitHubConnectionsEnglish } from "../../ui/src/i18n/locales/en-github-connections.ts";
 import { registerGitHubEnglish } from "../../ui/src/i18n/locales/en-github.ts";
 import { registerLabsEnglish } from "../../ui/src/i18n/locales/en-labs.ts";
 import { registerLinkReaderEnglish } from "../../ui/src/i18n/locales/en-link-reader.ts";
@@ -91,6 +93,7 @@ const sourceFiles = [
   "en-login.ts",
   "en-link-reader.ts",
   "en-github.ts",
+  "en-github-connections.ts",
   "en-mcp.ts",
   "en-mcp-app.ts",
   "en-meetings.ts",
@@ -110,6 +113,7 @@ const sourceFiles = [
   "en-settings.ts",
   "en-sidebar-attention.ts",
   "en-skill-library.ts",
+  "en-session-skill-library.ts",
   "en-skill-workshop.ts",
   "en-skills-browser.ts",
   "en-systems.ts",
@@ -170,9 +174,9 @@ export function loadControlUiSourceCatalog(): TranslationMap {
       },
       sessionHovercard: registerGitHubEnglish.catalog.sessionHovercard,
       githubPublication: registerGitHubEnglish.catalog.githubPublication,
-      githubConnections: registerGitHubEnglish.catalog.githubConnections,
+      githubConnections: registerGitHubConnectionsEnglish.catalog.githubConnections,
       agentTools: {
-        ...registerGitHubEnglish.catalog.agentTools,
+        ...registerGitHubConnectionsEnglish.catalog.agentTools,
         ...en.agentTools,
         ...registerToolDiagnosticsEnglish.catalog.agentTools,
       },
@@ -184,6 +188,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
       palette: registerCommandPaletteEnglish.catalog.palette,
       debug: registerDebugEnglish.catalog.debug,
       desktop: registerDesktopEnglish.catalog.desktop,
+      pluginsPage: registerPluginManagementEnglish.catalog.pluginsPage,
       attention: registerSidebarAttentionEnglish.catalog.attention,
       profilePage: {
         ...en.profilePage,
@@ -229,13 +234,19 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerUpdateActionsEnglish.catalog,
     registerTranscriptsEnglish.catalog,
     registerUsageEnglish.catalog,
+    { publicReader: PUBLIC_SESSION_COPY },
     loadControlUiCoreHintCatalog(),
   );
 }
 
 export async function readControlUiSourceCatalog(): Promise<string> {
   const sources = await Promise.all(
-    sourceFiles.map((fileName) => readFile(path.join(localesDir, fileName), "utf8")),
+    [
+      ...sourceFiles.map((fileName) => path.join(localesDir, fileName)),
+      path.resolve(localesDir, "../../../../src/shared/public-session-copy.ts"),
+      path.resolve(localesDir, "../../../../extensions/active-memory/control-ui.presentation.json"),
+      path.resolve(localesDir, "../../../../extensions/memory-wiki/control-ui.presentation.json"),
+    ].map((filePath) => readFile(filePath, "utf8")),
   );
   return [...sources, JSON.stringify(loadControlUiCoreHintCatalog())].join("\n");
 }

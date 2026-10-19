@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { WorkerTaskPool } from "../../infra/worker-task-pool.js";
 import { writeSkill } from "../test-support/e2e-test-helpers.js";
 import { getSkillsSnapshotVersion, registerSkillsChangeListener } from "./refresh-state.js";
 import { closeSkillsWatchers, refreshSkillsDiscovery } from "./refresh.js";
@@ -28,9 +29,24 @@ beforeEach(() => {
   })) {
     vi.stubEnv(key, value);
   }
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  vi.useFakeTimers({
+    toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+  });
+  vi.setSystemTime(0);
 });
 const config = { plugins: { enabled: false } };
+
+async function completePassiveScan() {
+  const tasks = vi.spyOn(WorkerTaskPool.prototype, "run");
+  try {
+    for (let elapsed = 0; elapsed < 30 * 60_000 + 50; elapsed += 60_000) {
+      await vi.advanceTimersByTimeAsync(Math.min(60_000, 30 * 60_000 + 50 - elapsed));
+      await Promise.all(tasks.mock.results.map((result) => result.value));
+    }
+  } finally {
+    tasks.mockRestore();
+  }
+}
 
 describe("content-addressed skill refresh", () => {
   it("honors a per-call passive refresh opt-out without disabling another observer", async () => {
@@ -40,7 +56,7 @@ describe("content-addressed skill refresh", () => {
     const params = { workspaceDir, config, watch: false };
     const original = await resolveReusableWorkspaceSkillSnapshot(params);
     await writeSkill({ dir: skillDir, name: "demo", description: "Passive change" });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await completePassiveScan();
     const unobserved = await resolveReusableWorkspaceSkillSnapshot({
       ...params,
       existingSnapshot: original.snapshot,
@@ -58,7 +74,7 @@ describe("content-addressed skill refresh", () => {
         }
       });
     });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await completePassiveScan();
     await published;
     const observed = await resolveReusableWorkspaceSkillSnapshot({
       ...params,
@@ -79,7 +95,7 @@ describe("content-addressed skill refresh", () => {
     const changed = vi.fn();
     const unregister = registerSkillsChangeListener(changed);
     try {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await completePassiveScan();
       const next = await resolveReusableWorkspaceSkillSnapshot({
         ...params,
         existingSnapshot: first.snapshot,
@@ -89,7 +105,7 @@ describe("content-addressed skill refresh", () => {
       expect(next.shouldRefresh).toBe(false);
       expect(changed).not.toHaveBeenCalled();
       await fs.appendFile(path.join(skillDir, "SKILL.md"), "\nNew instructions\n");
-      await vi.advanceTimersByTimeAsync(60_000);
+      await completePassiveScan();
       const edited = await resolveReusableWorkspaceSkillSnapshot({
         ...params,
         existingSnapshot: first.snapshot,
@@ -221,7 +237,7 @@ describe("content-addressed skill refresh", () => {
     const first = await resolveReusableWorkspaceSkillSnapshot(params);
     await fs.rename(workspaceDir, path.join(tempDirs.make("skills-content-old-"), "workspace"));
     await writeSkill({ dir: skillDir, name: "demo", description: "Replacement workspace" });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await completePassiveScan();
     const next = await resolveReusableWorkspaceSkillSnapshot({
       ...params,
       existingSnapshot: first.snapshot,
@@ -249,7 +265,7 @@ describe("content-addressed skill refresh", () => {
     expect(first.snapshot.prompt).toContain("Winner");
     const version = getSkillsSnapshotVersion(workspaceDir);
     await fs.appendFile(path.join(loser, "SKILL.md"), "\nChanged loser\n");
-    await vi.advanceTimersByTimeAsync(60_000);
+    await completePassiveScan();
     const unchanged = await resolveReusableWorkspaceSkillSnapshot({
       ...params,
       existingSnapshot: first.snapshot,
@@ -258,7 +274,7 @@ describe("content-addressed skill refresh", () => {
     expect(unchanged.snapshot).toBe(first.snapshot);
     expect(unchanged.shouldRefresh).toBe(false);
     await fs.unlink(path.join(winner, "SKILL.md"));
-    await vi.advanceTimersByTimeAsync(60_000);
+    await completePassiveScan();
     const fallback = await resolveReusableWorkspaceSkillSnapshot({
       ...params,
       existingSnapshot: first.snapshot,
