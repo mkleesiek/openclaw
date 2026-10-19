@@ -50,19 +50,54 @@ const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 it.runIf(process.platform === "linux")(
   "preserves a large diagnostic across nonblocking worker stdout",
-  () => {
-    // JSON escaping makes this reply larger than a normal pipe/socket buffer,
-    // while the argv path remains below Linux's per-argument limit.
-    const pathname = `${tempDirs.make("sqlite-large-diagnostic-")}/${"\u0001".repeat(90_000)}`;
+  async () => {
+    const root = tempDirs.make("sqlite-large-diagnostic-");
+    const pathname = path.join(root, "source.sqlite");
+    const diagnostic =
+      "synthetic SQLite inspection failure: " + "\u0001".repeat(90_000) + ":end ⚡";
+    const payloadBytes = Buffer.byteLength(JSON.stringify({ ok: false, message: diagnostic }));
+    expect(payloadBytes).toBeGreaterThan(512 * 1024);
+    expect(payloadBytes).toBeLessThan(1024 * 1024);
+    const preload = path.join(root, "large-diagnostic.mjs");
+    // Inject a deterministic native-boundary error only in the real child. Native
+    // ENAMETOOLONG messages are truncated by Bun before the worker serializes them.
+    fs.writeFileSync(
+      preload,
+      `
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+      const openSync = fs.openSync;
+      fs.openSync = function (file, ...args) {
+        if (file === ${JSON.stringify(pathname)}) {
+          throw new Error("synthetic SQLite inspection failure: " + "\\u0001".repeat(90_000) + ":end ⚡");
+        }
+        return openSync.call(this, file, ...args);
+      };
+      syncBuiltinESMExports();
+      // Exercise a nonblocking pipe/socket even before startup imports touch stdout.
+      process.stdout._handle.setBlocking(false);
+    `,
+    );
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    let response: ReturnType<typeof actual.spawnSync> | undefined;
+    vi.mocked(spawnSync).mockImplementationOnce((file, args, options) => {
+      response = actual.spawnSync(file, ["--import", preload, ...(args ?? [])], options);
+      return response;
+    });
     let failure: unknown;
     try {
       runSqliteReadOnlyWorkerSync(pathname, undefined, "file-generation");
     } catch (error) {
       failure = error;
     }
+    expect(response?.error).toBeUndefined();
+    expect(response?.status).toBe(1);
+    expect(response?.stderr).toBe("");
+    expect(Buffer.byteLength(String(response?.stdout))).toBe(payloadBytes);
     expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain(pathname);
-    expect((failure as Error).message).toContain("ENAMETOOLONG");
+    const expectedFailure = `SQLite read-only worker ${diagnostic}`;
+    expect((failure as Error).message.length).toBe(expectedFailure.length);
+    expect((failure as Error).message).toBe(expectedFailure);
   },
 );
 
