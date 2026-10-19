@@ -390,15 +390,7 @@ async function prepareExtensionPackageBoundaryArtifacts(argv: string[], signal: 
         return {
           label: `${unit.id} boundary dts`,
           args: unit.args,
-          // Diagnostic-only PR probe: keep compiler limits and cancellation unchanged.
-          env:
-            unit.id === "plugin-sdk" && compilerEnv.GITHUB_ACTIONS === "true"
-              ? {
-                  ...compilerEnv,
-                  OPENCLAW_NATIVE_DECLARATION_DIAGNOSTICS: "1",
-                  GODEBUG: [compilerEnv.GODEBUG, "gctrace=1"].filter(Boolean).join(","),
-                }
-              : compilerEnv,
+          env: compilerEnv,
           signal,
           timeoutMs: Math.min(
             unit.id === "plugin-sdk" ? resolveBoundaryRootShimsTimeoutMs() : 300_000,
