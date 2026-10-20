@@ -11,6 +11,7 @@ import { formatToolSummary, resolveToolDisplay } from "../../agents/tool-display
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { prefixSystemMessage } from "../../infra/system-message.js";
 import { truncateUtf16WithEllipsis as truncateText } from "../../shared/text-truncate.js";
+import { copyReplyPayloadMetadata } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
 import { isAcpTagVisible, resolveAcpProjectionSettings } from "./acp-stream-settings.js";
 import { createBlockReplyPipeline } from "./block-reply-pipeline.js";
@@ -38,19 +39,6 @@ type BufferedToolDelivery = {
   payload: ReplyPayload;
   meta?: AcpDispatchDeliveryMeta;
 };
-
-function shouldInsertSeparator(params: {
-  separator: " " | "\n\n";
-  previousTail: string | undefined;
-  nextText: string;
-}): boolean {
-  if (!params.previousTail || /^\s/.test(params.nextText)) {
-    return false;
-  }
-  return params.separator === " "
-    ? !/\s$/.test(params.previousTail)
-    : !params.previousTail.endsWith("\n");
-}
 
 function shouldFlushLiveBufferOnBoundary(text: string): boolean {
   return (
@@ -112,7 +100,11 @@ export function createAcpReplyProjector(params: {
   });
   const blockReplyPipeline = createBlockReplyPipeline({
     onBlockReply: async (payload) => {
-      await params.deliver("block", payload);
+      // The chunker emits disjoint pieces, not replacement snapshots.
+      await params.deliver(
+        "block",
+        copyReplyPayloadMetadata(payload, { ...payload, textMode: "delta" }),
+      );
     },
     timeoutMs: ACP_BLOCK_REPLY_TIMEOUT_MS,
     coalescing: isLive ? undefined : streaming.coalescing,
@@ -171,9 +163,6 @@ export function createAcpReplyProjector(params: {
     clearLiveIdleTimer();
     liveIdleTimer = setTimeout(() => {
       flushLiveBuffer(true);
-      if (bufferedText) {
-        scheduleLiveIdleFlush();
-      }
     }, liveIdleFlushMs);
   };
 
@@ -181,8 +170,8 @@ export function createAcpReplyProjector(params: {
     if (isLive) {
       clearLiveIdleTimer();
       flushLiveBuffer();
-    }
-    if (!isLive) {
+      drainChunker();
+    } else {
       if (await params.shouldSendToolSummaries()) {
         for (const entry of pendingToolDeliveries.splice(0)) {
           await params.deliver("tool", entry.payload, entry.meta);
@@ -195,8 +184,6 @@ export function createAcpReplyProjector(params: {
         bufferedText = "";
         await params.deliver("final", { text });
       }
-    } else {
-      drainChunker();
     }
     await blockReplyPipeline.flush({ force: true });
   };
@@ -308,11 +295,11 @@ export function createAcpReplyProjector(params: {
       }
       if (
         pendingHiddenBoundary &&
-        shouldInsertSeparator({
-          separator: hiddenBoundarySeparator,
-          previousTail: lastVisibleOutputTail,
-          nextText: text,
-        })
+        lastVisibleOutputTail &&
+        !/^\s/.test(text) &&
+        (hiddenBoundarySeparator === " "
+          ? !/\s$/.test(lastVisibleOutputTail)
+          : !lastVisibleOutputTail.endsWith("\n"))
       ) {
         text = `${hiddenBoundarySeparator}${text}`;
       }
@@ -352,7 +339,7 @@ export function createAcpReplyProjector(params: {
       }
       if (event.tag === "usage_update" && settings.repeatSuppression) {
         const usageTuple =
-          typeof event.used === "number" && typeof event.size === "number"
+          event.used !== undefined && event.size !== undefined
             ? `${event.used}/${event.size}`
             : event.text.trim();
         if (usageTuple === lastUsageTuple) {

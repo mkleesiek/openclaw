@@ -11,12 +11,12 @@ import {
   buildWhatsAppQuotedMessageKeyFromObservedMessage,
   requireWhatsAppTriggerMessageId,
   waitForScenarioObservedMessage,
+  waitForWhatsAppQuotedMessage,
 } from "./whatsapp-live.observations.js";
 import { createWhatsAppMessageScenario } from "./whatsapp-live.scenario-builders.js";
 
 function createWhatsAppQuoteReplyScenario(target: "dm" | "group") {
   return createWhatsAppMessageScenario({
-    posture: "user-path",
     configOverrides: { replyToMode: "all" },
     ...(target === "group" ? { requiresGroupJid: true } : {}),
     marker: `WHATSAPP_QA_REPLY_TO_${target.toUpperCase()}`,
@@ -37,13 +37,11 @@ function createWhatsAppQuoteReplyScenario(target: "dm" | "group") {
 
 export const whatsappConversationScenarios = {
   whatsappQaCanaryScenario: createWhatsAppMessageScenario({
-    posture: "user-path",
     marker: "WHATSAPP_QA_ECHO",
     buildRun: (token) => ({ input: `Reply with only this exact marker: ${token}` }),
   }),
 
   whatsappQaMentionGatingScenario: {
-    posture: "user-path",
     requiresGroupJid: true,
     buildRun: () => {
       const quietToken = `WHATSAPP_QA_GROUP_QUIET_${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -62,7 +60,6 @@ export const whatsappConversationScenarios = {
   },
 
   whatsappQaGroupPendingHistoryContextScenario: {
-    posture: "user-path",
     configOverrides: {
       groupHistoryLimit: 50,
       groupPolicy: "open",
@@ -94,7 +91,6 @@ export const whatsappConversationScenarios = {
   },
 
   whatsappQaBroadcastGroupFanoutScenario: createWhatsAppMessageScenario({
-    posture: "user-path",
     configOverrides: {
       broadcast: {
         agents: ["main", "qa-second"],
@@ -129,7 +125,6 @@ export const whatsappConversationScenarios = {
   }),
 
   whatsappQaGroupActivationAlwaysScenario: {
-    posture: "user-path",
     configOverrides: {
       groupPolicy: "open",
     },
@@ -209,7 +204,6 @@ export const whatsappConversationScenarios = {
   },
 
   whatsappQaGroupReplyToBotTriggersScenario: {
-    posture: "user-path",
     configOverrides: {
       groupPolicy: "open",
     },
@@ -234,22 +228,12 @@ export const whatsappConversationScenarios = {
             throw new Error("WhatsApp driver did not return a quoted trigger message id.");
           }
           const quotedTriggerMessageId = quotedTrigger.messageId;
-          await waitForScenarioObservedMessage(context, {
-            diagnosticChecks: [
-              {
-                label: "containsTriggerMarker",
-                match: (message) => message.text.includes(triggerMarker),
-              },
-              {
-                label: "quotesTrigger",
-                match: (message) => message.quoted?.messageId === quotedTriggerMessageId,
-              },
-            ],
-            match: (message) =>
-              message.text.includes(triggerMarker) &&
-              message.quoted?.messageId === quotedTriggerMessageId,
+          await waitForWhatsAppQuotedMessage(context, {
             observedAfter: quotedStartedAt,
             timeoutMs: 60_000,
+            textMarker: triggerMarker,
+            quotedMessageId: quotedTriggerMessageId,
+            diagnosticLabels: ["containsTriggerMarker", "quotesTrigger"],
           });
           return "quoted reply to bot triggered a group response without an explicit mention";
         },
@@ -263,7 +247,6 @@ export const whatsappConversationScenarios = {
   },
 
   whatsappQaTopLevelReplyShapeScenario: createWhatsAppMessageScenario({
-    posture: "user-path",
     configOverrides: {
       replyToMode: "off",
     },
@@ -285,7 +268,6 @@ export const whatsappConversationScenarios = {
   whatsappQaGroupReplyToMessageScenario: createWhatsAppQuoteReplyScenario("group"),
 
   whatsappQaReplyToModeBatchedScenario: {
-    posture: "user-path",
     configOverrides: {
       inboundDebounceMs: 2_000,
       replyToMode: "batched",

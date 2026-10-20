@@ -50,34 +50,15 @@ export abstract class AgentSessionExecution extends AgentSessionExtensions {
         : 0;
     const delayMs = Math.max(backoffDelayMs, retryAfterDelayMs);
 
-    this.emit({
-      type: "auto_retry_start",
-      attempt: this.retryCount,
-      maxAttempts: settings.maxRetries,
-      delayMs,
-      errorMessage: message.errorMessage || "Unknown error",
-    });
-
-    // Async tool results can settle after the error. Keep them and the durable transcript.
-    const messages = this.agent.state.messages;
-    const failedIndex = messages.findLastIndex((candidate) => candidate === message);
-    if (failedIndex >= 0) {
-      this.agent.state.messages = messages.toSpliced(failedIndex, 1);
-    }
+    this.emit({ type: "auto_retry_start" });
 
     this.retryAbortController = new AbortController();
     try {
       await sleep(delayMs, this.retryAbortController.signal);
     } catch {
       // Aborted during sleep - emit end event so UI can clean up
-      const attempt = this.retryCount;
       this.retryCount = 0;
-      this.emit({
-        type: "auto_retry_end",
-        success: false,
-        attempt,
-        finalError: "Retry cancelled",
-      });
+      this.emit({ type: "auto_retry_end" });
       return false;
     } finally {
       this.retryAbortController = undefined;
